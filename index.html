@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Payslip PDF Editor</title>
+  <title>Payslip BIP</title>
+  <link rel="icon" type="image/png" href="./favicon-bipo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,101 +15,55 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <div>
-          <h1>Payslip PDF Editor</h1>
-          <p>Search, preview, edit area tertentu, autosave, dan print</p>
+      <div class="brand-row">
+        <div class="brand-left">
+          <img id="brandLogo" class="brand-logo" src="./hoplun.jpg" alt="Payslip BIP Logo" />
+          <div>
+            <h1>Payslip BIP</h1>
+            <div class="db-status" id="dbStatusWrap">
+              <span id="dbStatusDot" class="db-status-dot"></span>
+              <span id="dbStatusText">Belum terhubung</span>
+            </div>
+          </div>
         </div>
-        <div class="badge">Drive Folder Hardcoded</div>
+        <button id="settingsBtn" class="icon-btn" title="Pengaturan">⚙</button>
       </div>
 
-      <section class="card">
+      <section class="card search-card">
         <div class="field-group">
           <label for="periodSelect">Periode</label>
           <select id="periodSelect"></select>
         </div>
-        <div class="field-group">
+        <div class="field-group search-field">
           <label for="searchInput">Cari No ID / Nama</label>
-          <input id="searchInput" type="search" placeholder="Contoh: SR260033 atau BAROKAH" autocomplete="off" />
+          <input id="searchInput" type="search" placeholder="Ketik No ID atau Nama..." autocomplete="off" />
+          <div id="searchResults" class="search-results hidden"></div>
         </div>
-        <div class="field-group">
-          <label for="employeeSelect">Hasil</label>
-          <select id="employeeSelect" size="8"></select>
-        </div>
-        <div class="toolbar two-col">
-          <button id="refreshBtn" class="btn btn-light">Refresh</button>
-          <button id="syncBtn" class="btn btn-light">Reload Preview</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-head">
-          <h2>Area Edit</h2>
-          <button id="addAreaBtn" class="btn btn-primary btn-sm">Tambah Area</button>
-        </div>
-        <div class="field-group compact-grid">
-          <div>
-            <label for="areaPage">Page</label>
-            <input id="areaPage" type="number" min="1" value="1" />
-          </div>
-          <div>
-            <label for="areaFontSize">Font</label>
-            <input id="areaFontSize" type="number" min="6" max="40" value="12" />
-          </div>
-          <div>
-            <label for="areaX">X</label>
-            <input id="areaX" type="number" min="0" step="0.1" value="30" />
-          </div>
-          <div>
-            <label for="areaY">Y</label>
-            <input id="areaY" type="number" min="0" step="0.1" value="50" />
-          </div>
-          <div>
-            <label for="areaWidth">Width</label>
-            <input id="areaWidth" type="number" min="10" step="0.1" value="140" />
-          </div>
-          <div>
-            <label for="areaHeight">Height</label>
-            <input id="areaHeight" type="number" min="8" step="0.1" value="14" />
-          </div>
-        </div>
-        <div class="field-group">
-          <label for="areaLabel">Nama Area</label>
-          <input id="areaLabel" type="text" placeholder="Misal: Net Salary" />
-        </div>
-        <div class="field-group">
-          <label for="areaText">Isi Teks</label>
-          <textarea id="areaText" rows="3" placeholder="Teks pengganti"></textarea>
-        </div>
-        <div class="toolbar three-col">
-          <button id="updateAreaBtn" class="btn btn-light">Update Area</button>
-          <button id="deleteAreaBtn" class="btn btn-danger">Hapus</button>
-          <button id="saveBtn" class="btn btn-success">Save / Timpa PDF</button>
-        </div>
-        <div class="field-group">
-          <label>Daftar Area</label>
-          <div id="areaList" class="area-list empty">Belum ada area edit.</div>
+        <div class="toolbar two-col compact-actions">
+          <button id="refreshBtn" class="btn btn-light">↻ Refresh</button>
+          <button id="syncBtn" class="btn btn-light">⟳ Reload</button>
         </div>
       </section>
 
       <section class="card status-card">
-        <div><strong>Status:</strong> <span id="statusText">Menunggu</span></div>
-        <div><strong>File:</strong> <span id="fileNameText">-</span></div>
-        <div><strong>ID:</strong> <span id="employeeIdText">-</span></div>
-        <div><strong>Nama:</strong> <span id="employeeNameText">-</span></div>
+        <div><strong>Status</strong><span id="statusText">Menunggu</span></div>
+        <div><strong>File</strong><span id="fileNameText">-</span></div>
+        <div><strong>ID</strong><span id="employeeIdText">-</span></div>
+        <div><strong>Nama</strong><span id="employeeNameText">-</span></div>
       </section>
     </aside>
 
     <main class="main-stage">
       <div class="preview-toolbar">
-        <div class="left-actions">
-          <button id="printBtn" class="btn btn-primary">Print</button>
-          <button id="downloadBtn" class="btn btn-light">Download PDF</button>
+        <div class="toolbar-title-group">
+          <div class="toolbar-title">Preview Payslip</div>
+          <div class="toolbar-subtitle">Klik area teks untuk edit langsung. Double click area kosong untuk tambah area baru.</div>
         </div>
         <div class="right-actions">
           <span id="pageInfo">Page 1 / 1</span>
-          <button id="zoomOutBtn" class="btn btn-light btn-sm">-</button>
-          <button id="zoomInBtn" class="btn btn-light btn-sm">+</button>
+          <button id="zoomOutBtn" class="btn btn-light btn-sm">−</button>
+          <button id="zoomInBtn" class="btn btn-light btn-sm">＋</button>
+          <button id="printBtn" class="btn btn-premium">🖨 Print</button>
         </div>
       </div>
 
@@ -118,12 +73,27 @@
     </main>
   </div>
 
-  <template id="areaItemTemplate">
-    <button class="area-item" type="button">
-      <div class="area-item-title"></div>
-      <div class="area-item-subtitle"></div>
-    </button>
-  </template>
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop" data-close-settings="1"></div>
+    <div class="modal-panel">
+      <div class="modal-head">
+        <h2>Pengaturan</h2>
+        <button class="icon-btn" data-close-settings="1">✕</button>
+      </div>
+      <div class="field-group">
+        <label for="titleInput">Judul</label>
+        <input id="titleInput" type="text" value="Payslip BIP" />
+      </div>
+      <div class="field-group">
+        <label for="logoInput">Logo</label>
+        <input id="logoInput" type="file" accept="image/*" />
+      </div>
+      <div class="toolbar two-col">
+        <button id="resetLogoBtn" class="btn btn-light">Reset Logo</button>
+        <button id="saveSettingsBtn" class="btn btn-primary">Simpan</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="./app.js"></script>
 </body>
