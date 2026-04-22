@@ -109,6 +109,36 @@ function bytesToBase64(bytes) {
   }
   return btoa(binary);
 }
+function extractSrId(record) {
+  const candidates = [
+    record?.srId,
+    record?.employeeCode,
+    record?.employeeId,
+    record?.fileName
+  ].filter(Boolean);
+
+  for (const value of candidates) {
+    const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/);
+    if (match) return match[0];
+  }
+  return '';
+}
+function extractDisplayName(record) {
+  const explicitName = String(record?.employeeName || record?.name || '').trim();
+  if (explicitName) return explicitName;
+
+  const fileName = String(record?.fileName || '');
+  const match = fileName.match(/^[^-]+-(SR[0-9]{5,})-(.+?)-ID[0-9]{8}-Payslip\.pdf$/i);
+  if (match && match[2]) return match[2].replace(/[-_]+/g, ' ').trim();
+
+  return '';
+}
+function getDisplayId(record) {
+  return extractSrId(record) || String(record?.employeeId || '').trim();
+}
+function getDisplayName(record) {
+  return extractDisplayName(record) || String(record?.employeeName || '').trim();
+}
 function saveCache() {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
@@ -180,9 +210,10 @@ function getSearchRows() {
   return state.records.filter(record => {
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     if (!q) return false;
-    return normalize(record.employeeId).includes(q) ||
-      normalize(record.employeeName).includes(q) ||
-      normalize(record.fileName).includes(q);
+
+    const srId = normalize(getDisplayId(record));
+    const name = normalize(getDisplayName(record));
+    return srId.includes(q) || name.includes(q);
   }).slice(0, 12);
 }
 function renderSearchResults() {
@@ -197,8 +228,8 @@ function renderSearchResults() {
   if (state.searchIndex < 0 || state.searchIndex > rows.length - 1) state.searchIndex = 0;
   el.searchResults.innerHTML = rows.map((record, index) => `
     <div class="search-item ${index === state.searchIndex ? 'active' : ''}" data-index="${index}">
-      <div class="search-item-title">${escapeHtml(record.employeeId || '-')} - ${escapeHtml(record.employeeName || '-')}</div>
-      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')} • ${escapeHtml(record.fileName || '-')}</div>
+      <div class="search-item-title">${escapeHtml(getDisplayId(record) || '-')} - ${escapeHtml(getDisplayName(record) || '-')}</div>
+      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')}</div>
     </div>
   `).join('');
   el.searchResults.classList.remove('hidden');
@@ -209,8 +240,8 @@ function hideSearchResults() {
 function syncMetaPanel() {
   const r = state.selectedRecord;
   if (el.fileNameText) el.fileNameText.textContent = r?.fileName || '-';
-  if (el.employeeIdText) el.employeeIdText.textContent = r?.employeeId || '-';
-  if (el.employeeNameText) el.employeeNameText.textContent = r?.employeeName || '-';
+  if (el.employeeIdText) el.employeeIdText.textContent = getDisplayId(r) || '-';
+  if (el.employeeNameText) el.employeeNameText.textContent = getDisplayName(r) || '-';
 }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function markDirty() {
@@ -414,7 +445,7 @@ async function refreshDirectory(force = false) {
 }
 async function buildEditedPdfBytes() {
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
-  const pdfDoc = await PDFDocument.load(state.pdfBytes);
+  const pdfDoc = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
 
@@ -511,7 +542,7 @@ async function printCurrent() {
 function pickRecord(index) {
   const record = state.filteredRecords[index];
   if (!record) return;
-  if (el.searchInput) el.searchInput.value = `${record.employeeId || ''} - ${record.employeeName || ''}`.trim();
+  if (el.searchInput) el.searchInput.value = `${getDisplayId(record) || ''} - ${getDisplayName(record) || ''}`.trim();
   hideSearchResults();
   loadRecord(record);
 }
