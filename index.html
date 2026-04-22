@@ -1,504 +1,130 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Cetak PDF Massal</title>
-    
-    <!-- Tailwind CSS untuk Styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- FontAwesome untuk Ikon (menggantikan Lucide agar ramah CDN) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Library React & Babel (untuk menjalankan JSX di browser) -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
-    
-    <!-- Library PDF-lib & Google APIs -->
-    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-    <script src="https://apis.google.com/js/api.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payslip PDF Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.mjs" type="module"></script>
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans">
-    
-    <!-- Wadah Aplikasi React -->
-    <div id="root"></div>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div>
+          <h1>Payslip PDF Editor</h1>
+          <p>Search, preview, edit area tertentu, autosave, dan print</p>
+        </div>
+        <div class="badge">Drive Folder Hardcoded</div>
+      </div>
 
-    <!-- Skrip Utama Aplikasi -->
-    <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+      <section class="card">
+        <div class="field-group">
+          <label for="periodSelect">Periode</label>
+          <select id="periodSelect"></select>
+        </div>
+        <div class="field-group">
+          <label for="searchInput">Cari No ID / Nama</label>
+          <input id="searchInput" type="search" placeholder="Contoh: SR260033 atau BAROKAH" autocomplete="off" />
+        </div>
+        <div class="field-group">
+          <label for="employeeSelect">Hasil</label>
+          <select id="employeeSelect" size="8"></select>
+        </div>
+        <div class="toolbar two-col">
+          <button id="refreshBtn" class="btn btn-light">Refresh</button>
+          <button id="syncBtn" class="btn btn-light">Reload Preview</button>
+        </div>
+      </section>
 
-        function App() {
-            const [pdfFiles, setPdfFiles] = useState([]);
-            const [selectedIds, setSelectedIds] = useState(new Set());
-            const [searchQuery, setSearchQuery] = useState('');
-            const [isPdfLibLoaded, setIsPdfLibLoaded] = useState(false);
-            const [isProcessing, setIsProcessing] = useState(false);
-            
-            // State Google Drive
-            const [showDriveModal, setShowDriveModal] = useState(false);
-            const [driveConfig, setDriveConfig] = useState({
-                apiKey: 'AIzaSyCGV98TnpO9J2Vd3NfgRx4tplZEhd1CuhY',
-                clientId: '337758609563-are6d6lnbeho4uqegs3ioqesjio8h1m9.apps.googleusercontent.com',
-                folderId: '1MV_r6DXX8Lo7f7Lcv40mzQk_LvjctV2A'
-            });
-            const [isSyncingDrive, setIsSyncingDrive] = useState(false);
-            const [driveToken, setDriveToken] = useState(null);
+      <section class="card">
+        <div class="section-head">
+          <h2>Area Edit</h2>
+          <button id="addAreaBtn" class="btn btn-primary btn-sm">Tambah Area</button>
+        </div>
+        <div class="field-group compact-grid">
+          <div>
+            <label for="areaPage">Page</label>
+            <input id="areaPage" type="number" min="1" value="1" />
+          </div>
+          <div>
+            <label for="areaFontSize">Font</label>
+            <input id="areaFontSize" type="number" min="6" max="40" value="12" />
+          </div>
+          <div>
+            <label for="areaX">X</label>
+            <input id="areaX" type="number" min="0" step="0.1" value="30" />
+          </div>
+          <div>
+            <label for="areaY">Y</label>
+            <input id="areaY" type="number" min="0" step="0.1" value="50" />
+          </div>
+          <div>
+            <label for="areaWidth">Width</label>
+            <input id="areaWidth" type="number" min="10" step="0.1" value="140" />
+          </div>
+          <div>
+            <label for="areaHeight">Height</label>
+            <input id="areaHeight" type="number" min="8" step="0.1" value="14" />
+          </div>
+        </div>
+        <div class="field-group">
+          <label for="areaLabel">Nama Area</label>
+          <input id="areaLabel" type="text" placeholder="Misal: Net Salary" />
+        </div>
+        <div class="field-group">
+          <label for="areaText">Isi Teks</label>
+          <textarea id="areaText" rows="3" placeholder="Teks pengganti"></textarea>
+        </div>
+        <div class="toolbar three-col">
+          <button id="updateAreaBtn" class="btn btn-light">Update Area</button>
+          <button id="deleteAreaBtn" class="btn btn-danger">Hapus</button>
+          <button id="saveBtn" class="btn btn-success">Save / Timpa PDF</button>
+        </div>
+        <div class="field-group">
+          <label>Daftar Area</label>
+          <div id="areaList" class="area-list empty">Belum ada area edit.</div>
+        </div>
+      </section>
 
-            const fileInputRef = useRef(null);
+      <section class="card status-card">
+        <div><strong>Status:</strong> <span id="statusText">Menunggu</span></div>
+        <div><strong>File:</strong> <span id="fileNameText">-</span></div>
+        <div><strong>ID:</strong> <span id="employeeIdText">-</span></div>
+        <div><strong>Nama:</strong> <span id="employeeNameText">-</span></div>
+      </section>
+    </aside>
 
-            // Cek apakah library PDF sudah dimuat
-            useEffect(() => {
-                if (window.PDFLib) {
-                    setIsPdfLibLoaded(true);
-                } else {
-                    // Fallback pengecekan berkala jika internet lambat
-                    const interval = setInterval(() => {
-                        if (window.PDFLib) {
-                            setIsPdfLibLoaded(true);
-                            clearInterval(interval);
-                        }
-                    }, 500);
-                    return () => clearInterval(interval);
-                }
-            }, []);
+    <main class="main-stage">
+      <div class="preview-toolbar">
+        <div class="left-actions">
+          <button id="printBtn" class="btn btn-primary">Print</button>
+          <button id="downloadBtn" class="btn btn-light">Download PDF</button>
+        </div>
+        <div class="right-actions">
+          <span id="pageInfo">Page 1 / 1</span>
+          <button id="zoomOutBtn" class="btn btn-light btn-sm">-</button>
+          <button id="zoomInBtn" class="btn btn-light btn-sm">+</button>
+        </div>
+      </div>
 
-            // Atribut untuk input folder lokal
-            useEffect(() => {
-                if (fileInputRef.current) {
-                    fileInputRef.current.setAttribute('webkitdirectory', 'true');
-                    fileInputRef.current.setAttribute('directory', 'true');
-                }
-            }, []);
+      <div class="viewer-shell">
+        <div id="pdfContainer" class="pdf-container"></div>
+      </div>
+    </main>
+  </div>
 
-            // --- LOGIKA UPLOAD LOKAL ---
-            const handleFileUpload = (e) => {
-                const files = Array.from(e.target.files);
-                const pdfs = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
-                
-                const newFiles = pdfs.map((file) => {
-                    const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [];
-                    const folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : 'Root';
-                    
-                    return {
-                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
-                        name: file.name,
-                        folder: folderName,
-                        path: file.webkitRelativePath || file.name,
-                        file: file,
-                        size: (file.size / 1024).toFixed(2) + ' KB'
-                    };
-                });
+  <template id="areaItemTemplate">
+    <button class="area-item" type="button">
+      <div class="area-item-title"></div>
+      <div class="area-item-subtitle"></div>
+    </button>
+  </template>
 
-                setPdfFiles(prev => [...prev, ...newFiles]);
-                e.target.value = null;
-            };
-
-            const filteredFiles = useMemo(() => {
-                if (!searchQuery) return pdfFiles;
-                const lowerQuery = searchQuery.toLowerCase();
-                return pdfFiles.filter(f => 
-                    f.name.toLowerCase().includes(lowerQuery) || 
-                    f.folder.toLowerCase().includes(lowerQuery)
-                );
-            }, [pdfFiles, searchQuery]);
-
-            const toggleSelection = (id) => {
-                const newSelection = new Set(selectedIds);
-                if (newSelection.has(id)) {
-                    newSelection.delete(id);
-                } else {
-                    newSelection.add(id);
-                }
-                setSelectedIds(newSelection);
-            };
-
-            const selectAll = () => {
-                if (selectedIds.size === filteredFiles.length) {
-                    setSelectedIds(new Set());
-                } else {
-                    setSelectedIds(new Set(filteredFiles.map(f => f.id)));
-                }
-            };
-
-            const clearAllFiles = () => {
-                if (window.confirm('Apakah Anda yakin ingin menghapus semua data yang diunggah?')) {
-                    setPdfFiles([]);
-                    setSelectedIds(new Set());
-                    setSearchQuery('');
-                }
-            };
-
-            // --- LOGIKA GOOGLE DRIVE ---
-            const handleDriveAuthAndSync = () => {
-                if (!driveConfig.apiKey || !driveConfig.clientId || !driveConfig.folderId) {
-                    alert("Harap lengkapi API Key, Client ID, dan Folder ID Google Drive.");
-                    return;
-                }
-
-                setIsSyncingDrive(true);
-                
-                try {
-                    const tokenClient = window.google.accounts.oauth2.initTokenClient({
-                        client_id: driveConfig.clientId,
-                        scope: 'https://www.googleapis.com/auth/drive.readonly',
-                        callback: async (tokenResponse) => {
-                            if (tokenResponse.error !== undefined) {
-                                throw tokenResponse;
-                            }
-                            setDriveToken(tokenResponse.access_token);
-                            await fetchDriveFiles(tokenResponse.access_token);
-                        },
-                    });
-                    
-                    // MEMAKSA MUNCULNYA POPUP PILIHAN EMAIL
-                    tokenClient.requestAccessToken({prompt: 'select_account'});
-                    
-                } catch (error) {
-                    console.error("Gagal menghubungkan ke Google Drive:", error);
-                    alert("Gagal autentikasi Google Drive. Periksa kembali Client ID Anda.");
-                    setIsSyncingDrive(false);
-                }
-            };
-
-            const fetchDriveFiles = async (accessToken) => {
-                try {
-                    await new Promise((resolve) => window.gapi.load('client', resolve));
-                    await window.gapi.client.init({
-                        apiKey: driveConfig.apiKey,
-                        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-                    });
-
-                    let allFiles = [];
-                    let pageToken = null;
-                    
-                    do {
-                        const response = await window.gapi.client.drive.files.list({
-                            q: `'${driveConfig.folderId}' in parents and mimeType='application/pdf' and trashed=false`,
-                            fields: 'nextPageToken, files(id, name, size)',
-                            spaces: 'drive',
-                            pageSize: 1000,
-                            pageToken: pageToken
-                        });
-                        
-                        allFiles = allFiles.concat(response.result.files);
-                        pageToken = response.result.nextPageToken;
-                    } while (pageToken);
-
-                    const formattedFiles = allFiles.map(file => ({
-                        id: file.id,
-                        name: file.name,
-                        folder: 'Google Drive',
-                        path: `GDrive/${file.name}`,
-                        isDriveFile: true,
-                        size: file.size ? (file.size / 1024).toFixed(2) + ' KB' : 'Cloud File'
-                    }));
-
-                    setPdfFiles(prev => [...prev, ...formattedFiles]);
-                    setShowDriveModal(false);
-                    alert(`Berhasil menarik ${formattedFiles.length} data PDF dari Google Drive!`);
-                } catch (error) {
-                    console.error("Gagal mengambil file:", error);
-                    alert("Gagal mengambil file dari folder tersebut. Pastikan Folder ID benar dan API Key valid.");
-                } finally {
-                    setIsSyncingDrive(false);
-                }
-            };
-
-            const downloadDriveFile = async (fileId) => {
-                const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-                    headers: { 'Authorization': `Bearer ${driveToken}` }
-                });
-                if (!response.ok) throw new Error('Gagal mendownload file dari Google Drive');
-                return await response.arrayBuffer();
-            };
-
-            // --- LOGIKA CETAK ---
-            const handlePrintSelected = async () => {
-                if (selectedIds.size === 0) return;
-                
-                const filesToPrint = pdfFiles.filter(f => selectedIds.has(f.id));
-                setIsProcessing(true);
-
-                try {
-                    let printUrl = "";
-
-                    if (filesToPrint.length === 1 && !filesToPrint[0].isDriveFile) {
-                        printUrl = URL.createObjectURL(filesToPrint[0].file);
-                    } else {
-                        if (!window.PDFLib) throw new Error("Library PDF belum siap.");
-                        
-                        const { PDFDocument } = window.PDFLib;
-                        const mergedPdf = await PDFDocument.create();
-
-                        for (const item of filesToPrint) {
-                            try {
-                                let arrayBuffer;
-                                if (item.isDriveFile) {
-                                    if (!driveToken) throw new Error("Sesi Google Drive habis, silakan sinkron ulang.");
-                                    arrayBuffer = await downloadDriveFile(item.id);
-                                } else {
-                                    arrayBuffer = await item.file.arrayBuffer();
-                                }
-                                
-                                const pdf = await PDFDocument.load(arrayBuffer);
-                                const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-                                copiedPages.forEach((page) => mergedPdf.addPage(page));
-                            } catch (err) {
-                                console.warn(`Gagal memproses file ${item.name}:`, err);
-                            }
-                        }
-
-                        const mergedPdfBytes = await mergedPdf.save();
-                        const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
-                        printUrl = URL.createObjectURL(blob);
-                    }
-
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = printUrl;
-                    document.body.appendChild(iframe);
-
-                    iframe.onload = () => {
-                        setTimeout(() => {
-                            iframe.contentWindow.focus();
-                            iframe.contentWindow.print();
-                        }, 500);
-                    };
-
-                } catch (error) {
-                    console.error("Print Error: ", error);
-                    alert("Terjadi kesalahan saat mempersiapkan dokumen cetak.");
-                } finally {
-                    setIsProcessing(false);
-                }
-            };
-
-            return (
-                <div className="min-h-screen p-6">
-                    <div className="max-w-6xl mx-auto space-y-6">
-                        
-                        {/* Header */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                            <div>
-                                <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                                    <i className="fa-solid fa-print text-blue-600"></i>
-                                    Sistem Cetak PDF Massal
-                                </h1>
-                                <p className="text-slate-500 text-sm mt-1">
-                                    Tarik data dari Google Drive atau unggah folder lokal, lalu cetak sekaligus.
-                                </p>
-                            </div>
-                            
-                            <div className="flex flex-wrap items-center gap-3">
-                                <button
-                                    onClick={() => setShowDriveModal(true)}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm text-sm"
-                                >
-                                    <i className="fa-solid fa-cloud"></i> Tarik dari GDrive
-                                </button>
-                                <button
-                                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm text-sm"
-                                >
-                                    <i className="fa-solid fa-folder-open"></i> Unggah Lokal
-                                </button>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    multiple
-                                    accept=".pdf,application/pdf"
-                                    className="hidden"
-                                    onChange={handleFileUpload}
-                                />
-                                {pdfFiles.length > 0 && (
-                                    <button
-                                        onClick={clearAllFiles}
-                                        className="bg-white border border-red-200 text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 text-sm"
-                                    >
-                                        <i className="fa-solid fa-trash-can"></i> Bersihkan
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Banner Loading */}
-                        {!isPdfLibLoaded && (
-                            <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg flex items-center gap-2 text-sm">
-                                <i className="fa-solid fa-spinner fa-spin"></i> Sedang memuat modul pemroses PDF...
-                            </div>
-                        )}
-
-                        {/* Modal GDrive */}
-                        {showDriveModal && (
-                            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                                <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                                    <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-                                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                                            <i className="fa-solid fa-cloud text-emerald-600"></i> Sinkronisasi Google Drive
-                                        </h3>
-                                        <button onClick={() => setShowDriveModal(false)} className="text-slate-400 hover:text-slate-600">
-                                            <i className="fa-solid fa-xmark text-lg"></i>
-                                        </button>
-                                    </div>
-                                    <div className="p-6 space-y-4">
-                                        <div className="space-y-3">
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">Folder ID</label>
-                                                <input 
-                                                    type="text" 
-                                                    className="w-full text-sm p-2 border border-slate-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                    value={driveConfig.folderId}
-                                                    onChange={e => setDriveConfig({...driveConfig, folderId: e.target.value})}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">Google API Key</label>
-                                                <input 
-                                                    type="password" 
-                                                    className="w-full text-sm p-2 border border-slate-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                    value={driveConfig.apiKey}
-                                                    onChange={e => setDriveConfig({...driveConfig, apiKey: e.target.value})}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">OAuth Client ID</label>
-                                                <input 
-                                                    type="password" 
-                                                    className="w-full text-sm p-2 border border-slate-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none"
-                                                    value={driveConfig.clientId}
-                                                    onChange={e => setDriveConfig({...driveConfig, clientId: e.target.value})}
-                                                />
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={handleDriveAuthAndSync}
-                                            disabled={isSyncingDrive}
-                                            className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 mt-2"
-                                        >
-                                            {isSyncingDrive ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-cloud-arrow-down"></i>}
-                                            {isSyncingDrive ? 'Menghubungkan...' : 'Hubungkan & Tarik Data'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Konten Utama */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-200px)] min-h-[500px]">
-                            
-                            <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-                                <div className="relative w-full sm:w-96">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <i className="fa-solid fa-search text-slate-400"></i>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
-                                        placeholder="Cari nama file atau ID..."
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                    />
-                                </div>
-
-                                <div className="flex items-center gap-3 w-full sm:w-auto">
-                                    <span className="text-sm font-medium text-slate-500 hidden sm:inline-block">
-                                        {selectedIds.size} file terpilih
-                                    </span>
-                                    <button
-                                        onClick={handlePrintSelected}
-                                        disabled={selectedIds.size === 0 || isProcessing || !isPdfLibLoaded}
-                                        className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white px-5 py-2 rounded-lg font-medium transition-colors"
-                                    >
-                                        {isProcessing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-print"></i>}
-                                        {isProcessing ? 'Memproses...' : 'Cetak Terpilih'}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="flex-1 overflow-auto">
-                                {pdfFiles.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
-                                        <i className="fa-solid fa-file-pdf text-5xl mb-4 text-slate-300"></i>
-                                        <h3 className="text-lg font-medium text-slate-900 mb-1">Belum ada file</h3>
-                                        <p className="max-w-md">Klik "Tarik dari GDrive" atau "Unggah Lokal" di atas.</p>
-                                    </div>
-                                ) : filteredFiles.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
-                                        <i className="fa-solid fa-search text-5xl mb-4 text-slate-300"></i>
-                                        <h3 className="text-lg font-medium text-slate-900 mb-1">Tidak ditemukan</h3>
-                                        <p>Pencarian "{searchQuery}" tidak membuahkan hasil.</p>
-                                    </div>
-                                ) : (
-                                    <table className="min-w-full divide-y divide-slate-200">
-                                        <thead className="bg-slate-50 sticky top-0 z-10">
-                                            <tr>
-                                                <th scope="col" className="px-6 py-3 text-left w-10">
-                                                    <button onClick={selectAll} className="text-slate-400 hover:text-blue-600 text-lg">
-                                                        {selectedIds.size === filteredFiles.length && filteredFiles.length > 0 
-                                                            ? <i className="fa-solid fa-square-check text-blue-600"></i> 
-                                                            : <i className="fa-regular fa-square"></i>}
-                                                    </button>
-                                                </th>
-                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Nama File / ID</th>
-                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">Folder</th>
-                                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase">Ukuran</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="bg-white divide-y divide-slate-200">
-                                            {filteredFiles.map((file) => {
-                                                const isSelected = selectedIds.has(file.id);
-                                                return (
-                                                    <tr 
-                                                        key={file.id} 
-                                                        className={`hover:bg-blue-50/50 cursor-pointer ${isSelected ? 'bg-blue-50/30' : ''}`}
-                                                        onClick={() => toggleSelection(file.id)}
-                                                    >
-                                                        <td className="px-6 py-4">
-                                                            <button className={`text-lg ${isSelected ? 'text-blue-600' : 'text-slate-300'}`}>
-                                                                {isSelected ? <i className="fa-solid fa-square-check"></i> : <i className="fa-regular fa-square"></i>}
-                                                            </button>
-                                                        </td>
-                                                        <td className="px-6 py-4">
-                                                            <div className="flex items-center">
-                                                                <i className="fa-solid fa-file-pdf text-red-500 mr-3 text-lg"></i>
-                                                                <div className="text-sm font-medium text-slate-900">{file.name}</div>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-sm text-slate-500">
-                                                            <div className="flex items-center">
-                                                                {file.isDriveFile 
-                                                                    ? <i className="fa-brands fa-google-drive text-amber-500 mr-2"></i>
-                                                                    : <i className="fa-solid fa-folder text-amber-400 mr-2"></i>}
-                                                                {file.folder}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-right text-sm text-slate-500">{file.size}</td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
-                            
-                            <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 text-xs text-slate-500 flex justify-between">
-                                <div className="flex items-center gap-1">
-                                    <i className="fa-solid fa-circle-info"></i> Menampilkan {filteredFiles.length} dari {pdfFiles.length} data.
-                                </div>
-                                {isProcessing && <span className="text-blue-600 font-medium animate-pulse">Menyatukan dokumen...</span>}
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
