@@ -24,6 +24,7 @@ const state = {
   isDirty: false,
   isSaving: false,
   searchIndex: -1,
+  printFrame: null,
 };
 
 const el = {
@@ -210,7 +211,6 @@ function getSearchRows() {
   return state.records.filter(record => {
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     if (!q) return false;
-
     const srId = normalize(getDisplayId(record));
     const name = normalize(getDisplayName(record));
     return srId.includes(q) || name.includes(q);
@@ -523,17 +523,71 @@ async function savePdf(isAuto = false) {
     state.isSaving = false;
   }
 }
+function cleanupPrintFrame() {
+  if (state.printFrame && state.printFrame.parentNode) {
+    state.printFrame.parentNode.removeChild(state.printFrame);
+  }
+  state.printFrame = null;
+}
 async function printCurrent() {
   try {
     const bytes = state.isDirty ? await buildEditedPdfBytes() : state.previewBytes;
-    if (!bytes) return;
-    const blob = new Blob([bytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, '_blank');
-    if (win) {
-      setTimeout(() => { try { win.focus(); win.print(); } catch {} }, 600);
-      setTimeout(() => { try { win.focus(); win.print(); } catch {} }, 1500);
+    if (!bytes || !bytes.length) {
+      setStatus('PDF belum siap untuk dicetak');
+      return;
     }
+
+    setStatus('Menyiapkan cetak...');
+    cleanupPrintFrame();
+
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '1px';
+    iframe.style.height = '1px';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.src = blobUrl;
+    state.printFrame = iframe;
+
+    const finalize = () => {
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 15000);
+      setTimeout(cleanupPrintFrame, 16000);
+    };
+
+    iframe.onload = () => {
+      setStatus('Membuka dialog print...');
+      const win = iframe.contentWindow;
+      if (!win) {
+        setStatus('Gagal membuka dialog print');
+        finalize();
+        return;
+      }
+
+      const triggerPrint = () => {
+        try {
+          win.focus();
+          win.print();
+          setStatus('Dialog print dibuka');
+        } catch (error) {
+          console.error(error);
+          setStatus('Gagal membuka dialog print');
+        } finally {
+          finalize();
+        }
+      };
+
+      setTimeout(triggerPrint, 500);
+      setTimeout(triggerPrint, 1200);
+    };
+
+    document.body.appendChild(iframe);
   } catch (error) {
     console.error(error);
     setStatus(`Gagal print: ${error.message}`);
