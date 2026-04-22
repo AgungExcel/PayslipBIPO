@@ -1,6 +1,6 @@
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v3';
+const CACHE_KEY = 'payslip_bip_list_cache_v4';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
@@ -76,11 +76,7 @@ async function apiGet(action, params = {}) {
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error('Respons Apps Script bukan JSON.');
-  }
+  try { json = JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON.'); }
   if (json.ok === false) throw new Error(json.message || 'Request gagal');
   return json;
 }
@@ -105,19 +101,11 @@ function parseBase64(base64) {
 function bytesToBase64(bytes) {
   let binary = '';
   const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   return btoa(binary);
 }
 function extractSrId(record) {
-  const candidates = [
-    record?.srId,
-    record?.employeeCode,
-    record?.employeeId,
-    record?.fileName
-  ].filter(Boolean);
-
+  const candidates = [record?.srId, record?.employeeCode, record?.employeeId, record?.fileName].filter(Boolean);
   for (const value of candidates) {
     const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/);
     if (match) return match[0];
@@ -127,27 +115,15 @@ function extractSrId(record) {
 function extractDisplayName(record) {
   const explicitName = String(record?.employeeName || record?.name || '').trim();
   if (explicitName) return explicitName;
-
   const fileName = String(record?.fileName || '');
   const match = fileName.match(/^[^-]+-(SR[0-9]{5,})-(.+?)-ID[0-9]{8}-Payslip\.pdf$/i);
   if (match && match[2]) return match[2].replace(/[-_]+/g, ' ').trim();
-
   return '';
 }
-function getDisplayId(record) {
-  return extractSrId(record) || String(record?.employeeId || '').trim();
-}
-function getDisplayName(record) {
-  return extractDisplayName(record) || String(record?.employeeName || '').trim();
-}
+function getDisplayId(record) { return extractSrId(record) || String(record?.employeeId || '').trim(); }
+function getDisplayName(record) { return extractDisplayName(record) || String(record?.employeeName || '').trim(); }
 function saveCache() {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      at: Date.now(),
-      periods: state.periods,
-      records: state.records
-    }));
-  } catch {}
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), periods: state.periods, records: state.records })); } catch {}
 }
 function loadCache() {
   try {
@@ -161,9 +137,7 @@ function loadCache() {
     setDbState('connected', 'Terhubung (cache)');
     setStatus('Daftar file dimuat dari cache lokal');
     return !!state.records.length;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 function loadUiSettings() {
   try {
@@ -179,10 +153,7 @@ function loadUiSettings() {
 }
 function saveUiSettings() {
   const persist = () => {
-    const current = {
-      title: (el.titleInput?.value || 'Payslip BIP').trim() || 'Payslip BIP',
-      logoDataUrl: el.brandLogo?.src || './hoplun.jpg'
-    };
+    const current = { title: (el.titleInput?.value || 'Payslip BIP').trim() || 'Payslip BIP', logoDataUrl: el.brandLogo?.src || './hoplun.jpg' };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(current));
     document.title = current.title;
     const titleNode = document.querySelector('.brand-left h1');
@@ -192,14 +163,35 @@ function saveUiSettings() {
   const file = el.logoInput?.files?.[0];
   if (!file) return persist();
   const fr = new FileReader();
-  fr.onload = () => {
-    if (el.brandLogo) el.brandLogo.src = fr.result;
-    persist();
-  };
+  fr.onload = () => { if (el.brandLogo) el.brandLogo.src = fr.result; persist(); };
   fr.readAsDataURL(file);
 }
 function openSettings() { el.settingsModal?.classList.remove('hidden'); }
 function closeSettings() { el.settingsModal?.classList.add('hidden'); }
+function hideSubtitleAndPremiumButtons() {
+  const subtitle = document.querySelector('.toolbar-subtitle');
+  if (subtitle) subtitle.style.display = 'none';
+  if (el.refreshBtn) {
+    el.refreshBtn.textContent = '✦ Refresh';
+    Object.assign(el.refreshBtn.style, {
+      background: 'linear-gradient(135deg,#ffffff,#eef4ff)',
+      border: '1px solid #cfe0ff',
+      color: '#0f172a',
+      boxShadow: '0 10px 22px rgba(37,99,235,.10)',
+      fontWeight: '800'
+    });
+  }
+  if (el.syncBtn) {
+    el.syncBtn.textContent = '⟳ Reload';
+    Object.assign(el.syncBtn.style, {
+      background: 'linear-gradient(135deg,#0f172a,#334155)',
+      border: '1px solid #1e293b',
+      color: '#fff',
+      boxShadow: '0 12px 24px rgba(15,23,42,.18)',
+      fontWeight: '800'
+    });
+  }
+}
 function renderPeriods() {
   if (!el.periodSelect) return;
   el.periodSelect.innerHTML = state.periods.map(period => `<option value="${escapeHtml(period)}">${escapeHtml(period)}</option>`).join('');
@@ -234,9 +226,7 @@ function renderSearchResults() {
   `).join('');
   el.searchResults.classList.remove('hidden');
 }
-function hideSearchResults() {
-  el.searchResults?.classList.add('hidden');
-}
+function hideSearchResults() { el.searchResults?.classList.add('hidden'); }
 function syncMetaPanel() {
   const r = state.selectedRecord;
   if (el.fileNameText) el.fileNameText.textContent = r?.fileName || '-';
@@ -259,22 +249,17 @@ function makeOverlayNode(area, pageMeta) {
   overlay.style.width = `${area.width * pageMeta.scale}px`;
   overlay.style.height = `${area.height * pageMeta.scale}px`;
   overlay.classList.toggle('active', area.id === state.selectedOverlayId);
-
   const chip = document.createElement('div');
   chip.className = 'overlay-chip';
   chip.textContent = area.label || 'Text';
   overlay.appendChild(chip);
-
   const editor = document.createElement('textarea');
   editor.className = 'overlay-editor';
   editor.spellcheck = false;
   editor.value = area.text || '';
   editor.style.fontSize = `${Math.max(8, area.fontSize * pageMeta.scale)}px`;
   editor.addEventListener('mousedown', ev => ev.stopPropagation());
-  editor.addEventListener('focus', () => {
-    state.selectedOverlayId = area.id;
-    renderPdfPages();
-  });
+  editor.addEventListener('focus', () => { state.selectedOverlayId = area.id; renderPdfPages(); });
   editor.addEventListener('input', () => {
     area.text = editor.value;
     const newHeightPx = Math.max(editor.scrollHeight + 2, 18);
@@ -283,18 +268,13 @@ function makeOverlayNode(area, pageMeta) {
     markDirty();
   });
   overlay.appendChild(editor);
-
   const handle = document.createElement('div');
   handle.className = 'resize-handle';
   overlay.appendChild(handle);
-
   overlay.addEventListener('mousedown', (event) => {
     state.selectedOverlayId = area.id;
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startArea = { ...area };
+    const startX = event.clientX, startY = event.clientY, startArea = { ...area };
     const resizing = event.target.classList.contains('resize-handle');
-
     function onMove(ev) {
       const dx = (ev.clientX - startX) / pageMeta.scale;
       const dy = (ev.clientY - startY) / pageMeta.scale;
@@ -317,7 +297,6 @@ function makeOverlayNode(area, pageMeta) {
       window.addEventListener('mouseup', onUp);
     }
   });
-
   return overlay;
 }
 async function renderPdfPages() {
@@ -328,18 +307,15 @@ async function renderPdfPages() {
   }
   el.pdfContainer.innerHTML = '';
   const outputScale = Math.min(2.2, Math.max(1.5, window.devicePixelRatio || 1.5));
-
   for (let pageNumber = 1; pageNumber <= state.pdfDoc.numPages; pageNumber++) {
     const page = await state.pdfDoc.getPage(pageNumber);
     const cssViewport = page.getViewport({ scale: state.zoom });
     const renderViewport = page.getViewport({ scale: state.zoom * outputScale });
     const pdfViewport = page.getViewport({ scale: 1 });
-
     const wrap = document.createElement('div');
     wrap.className = 'page-wrap';
     wrap.style.width = `${cssViewport.width}px`;
     wrap.style.height = `${cssViewport.height}px`;
-
     const canvas = document.createElement('canvas');
     canvas.className = 'page-canvas';
     canvas.width = Math.floor(renderViewport.width);
@@ -347,14 +323,11 @@ async function renderPdfPages() {
     canvas.style.width = `${cssViewport.width}px`;
     canvas.style.height = `${cssViewport.height}px`;
     wrap.appendChild(canvas);
-
     const overlayNode = document.createElement('div');
     overlayNode.className = 'page-overlay';
     wrap.appendChild(overlayNode);
-
     const ctx = canvas.getContext('2d', { alpha: false });
     await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
-
     const pageMeta = {
       pageNumber,
       scale: cssViewport.width / pdfViewport.width,
@@ -362,34 +335,17 @@ async function renderPdfPages() {
       heightPdf: pdfViewport.height,
       overlayNode
     };
-
     overlayNode.addEventListener('dblclick', (event) => {
       const rect = overlayNode.getBoundingClientRect();
       const x = (event.clientX - rect.left) / pageMeta.scale;
       const y = (event.clientY - rect.top) / pageMeta.scale;
       const id = `area_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      state.overlays.push({
-        id,
-        page: pageNumber,
-        label: 'Text Baru',
-        text: '',
-        x: clamp(x, 0, pageMeta.widthPdf - 140),
-        y: clamp(y, 0, pageMeta.heightPdf - 22),
-        width: 140,
-        height: 20,
-        fontSize: 12
-      });
+      state.overlays.push({ id, page: pageNumber, label: 'Text Baru', text: '', x: clamp(x, 0, pageMeta.widthPdf - 140), y: clamp(y, 0, pageMeta.heightPdf - 22), width: 140, height: 20, fontSize: 12 });
       state.selectedOverlayId = id;
-      renderPdfPages().then(() => {
-        overlayNode.querySelector(`.overlay-box[data-id="${id}"] .overlay-editor`)?.focus();
-      });
+      renderPdfPages().then(() => overlayNode.querySelector(`.overlay-box[data-id="${id}"] .overlay-editor`)?.focus());
       markDirty();
     });
-
-    state.overlays
-      .filter(item => Number(item.page) === pageNumber)
-      .forEach(item => overlayNode.appendChild(makeOverlayNode(item, pageMeta)));
-
+    state.overlays.filter(item => Number(item.page) === pageNumber).forEach(item => overlayNode.appendChild(makeOverlayNode(item, pageMeta)));
     el.pdfContainer.appendChild(wrap);
   }
   if (el.pageInfo) el.pageInfo.textContent = `Page 1 / ${state.pdfDoc.numPages}`;
@@ -429,13 +385,8 @@ async function refreshDirectory(force = false) {
     saveCache();
     setDbState('connected', 'Terhubung');
     setStatus('Daftar file siap');
-
-    const current = state.selectedRecord?.fileId
-      ? state.records.find(item => item.fileId === state.selectedRecord.fileId)
-      : null;
-    if (current) {
-      await loadRecord(current);
-    }
+    const current = state.selectedRecord?.fileId ? state.records.find(item => item.fileId === state.selectedRecord.fileId) : null;
+    if (current) await loadRecord(current);
   } catch (error) {
     if (!force && loadCache()) return;
     setDbState('error', 'Gagal terhubung');
@@ -448,21 +399,12 @@ async function buildEditedPdfBytes() {
   const pdfDoc = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
-
   state.overlays.forEach(area => {
     const page = pages[area.page - 1];
     if (!page) return;
     const size = page.getSize();
     const drawY = size.height - area.y - area.height;
-    page.drawRectangle({
-      x: area.x,
-      y: drawY,
-      width: area.width,
-      height: area.height,
-      color: rgb(1, 1, 1),
-      opacity: 0.985
-    });
-
+    page.drawRectangle({ x: area.x, y: drawY, width: area.width, height: area.height, color: rgb(1, 1, 1), opacity: 0.985 });
     const lines = String(area.text || '').split(/\n/);
     const maxChars = Math.max(1, Math.floor(area.width / Math.max(1, area.fontSize * 0.52)));
     const wrapped = [];
@@ -470,26 +412,14 @@ async function buildEditedPdfBytes() {
       if (line.length <= maxChars) wrapped.push(line);
       else {
         let cursor = line;
-        while (cursor.length > maxChars) {
-          wrapped.push(cursor.slice(0, maxChars));
-          cursor = cursor.slice(maxChars);
-        }
+        while (cursor.length > maxChars) { wrapped.push(cursor.slice(0, maxChars)); cursor = cursor.slice(maxChars); }
         if (cursor) wrapped.push(cursor);
       }
     });
-
     wrapped.slice(0, Math.max(1, Math.floor(area.height / (area.fontSize + 1.5)))).forEach((line, idx) => {
-      page.drawText(line, {
-        x: area.x + 1,
-        y: drawY + area.height - area.fontSize - 1 - (idx * (area.fontSize + 1)),
-        font,
-        size: area.fontSize,
-        color: rgb(0, 0, 0),
-        maxWidth: area.width - 2
-      });
+      page.drawText(line, { x: area.x + 1, y: drawY + area.height - area.fontSize - 1 - (idx * (area.fontSize + 1)), font, size: area.fontSize, color: rgb(0, 0, 0), maxWidth: area.width - 2 });
     });
   });
-
   return await pdfDoc.save();
 }
 async function savePdf(isAuto = false) {
@@ -499,14 +429,7 @@ async function savePdf(isAuto = false) {
   try {
     const edited = await buildEditedPdfBytes();
     const overlaysCopy = structuredClone(state.overlays);
-    await apiPost('overwrite', {
-      fileId: state.selectedRecord.fileId,
-      fileName: state.selectedRecord.fileName,
-      mimeType: 'application/pdf',
-      base64: bytesToBase64(edited),
-      overlays: overlaysCopy,
-      record: { ...state.selectedRecord, overlays: overlaysCopy }
-    });
+    await apiPost('overwrite', { fileId: state.selectedRecord.fileId, fileName: state.selectedRecord.fileName, mimeType: 'application/pdf', base64: bytesToBase64(edited), overlays: overlaysCopy, record: { ...state.selectedRecord, overlays: overlaysCopy } });
     state.pdfBytes = new Uint8Array(edited);
     state.previewBytes = state.pdfBytes.slice();
     state.selectedRecord.overlays = overlaysCopy;
@@ -524,43 +447,41 @@ async function savePdf(isAuto = false) {
   }
 }
 function cleanupPrintFrame() {
-  if (state.printFrame && state.printFrame.parentNode) {
-    state.printFrame.parentNode.removeChild(state.printFrame);
-  }
+  if (state.printFrame && state.printFrame.parentNode) state.printFrame.parentNode.removeChild(state.printFrame);
   state.printFrame = null;
+}
+async function ensurePdfReady() {
+  if (state.previewBytes && state.previewBytes.length) return state.previewBytes;
+  if (state.selectedRecord?.fileId) {
+    const json = await apiGet('file', { fileId: state.selectedRecord.fileId });
+    state.pdfBytes = parseBase64(json.base64);
+    state.previewBytes = state.pdfBytes.slice();
+    return state.previewBytes;
+  }
+  return null;
 }
 async function printCurrent() {
   try {
-    const bytes = state.isDirty ? await buildEditedPdfBytes() : state.previewBytes;
+    setStatus('Menyiapkan cetak...');
+    const readyBytes = await ensurePdfReady();
+    const bytes = state.isDirty ? await buildEditedPdfBytes() : readyBytes;
     if (!bytes || !bytes.length) {
       setStatus('PDF belum siap untuk dicetak');
       return;
     }
-
-    setStatus('Menyiapkan cetak...');
     cleanupPrintFrame();
-
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
-
     const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '1px';
-    iframe.style.height = '1px';
-    iframe.style.border = '0';
+    Object.assign(iframe.style, {
+      position: 'fixed', right: '0', bottom: '0', width: '1px', height: '1px', border: '0', opacity: '0'
+    });
     iframe.setAttribute('aria-hidden', 'true');
-    iframe.src = blobUrl;
     state.printFrame = iframe;
-
     const finalize = () => {
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-      }, 15000);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
       setTimeout(cleanupPrintFrame, 16000);
     };
-
     iframe.onload = () => {
       setStatus('Membuka dialog print...');
       const win = iframe.contentWindow;
@@ -569,8 +490,7 @@ async function printCurrent() {
         finalize();
         return;
       }
-
-      const triggerPrint = () => {
+      const trigger = () => {
         try {
           win.focus();
           win.print();
@@ -582,12 +502,11 @@ async function printCurrent() {
           finalize();
         }
       };
-
-      setTimeout(triggerPrint, 500);
-      setTimeout(triggerPrint, 1200);
+      setTimeout(trigger, 700);
+      setTimeout(trigger, 1600);
     };
-
     document.body.appendChild(iframe);
+    iframe.src = blobUrl;
   } catch (error) {
     console.error(error);
     setStatus(`Gagal print: ${error.message}`);
@@ -601,99 +520,56 @@ function pickRecord(index) {
   loadRecord(record);
 }
 function bindEvents() {
-  el.periodSelect?.addEventListener('change', () => {
-    state.selectedPeriod = el.periodSelect.value;
-    state.searchIndex = -1;
-    renderSearchResults();
-  });
-
-  el.searchInput?.addEventListener('input', () => {
-    state.searchIndex = -1;
-    renderSearchResults();
-  });
+  el.periodSelect?.addEventListener('change', () => { state.selectedPeriod = el.periodSelect.value; state.searchIndex = -1; renderSearchResults(); });
+  el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
   el.searchInput?.addEventListener('focus', renderSearchResults);
   el.searchInput?.addEventListener('keydown', (event) => {
     if (el.searchResults?.classList.contains('hidden')) return;
     const max = state.filteredRecords.length - 1;
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      state.searchIndex = Math.min(max, state.searchIndex + 1);
-      renderSearchResults();
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      state.searchIndex = Math.max(0, state.searchIndex - 1);
-      renderSearchResults();
-    } else if (event.key === 'Enter') {
-      event.preventDefault();
-      if (state.searchIndex >= 0) pickRecord(state.searchIndex);
-    } else if (event.key === 'Escape') {
-      hideSearchResults();
-    }
+    if (event.key === 'ArrowDown') { event.preventDefault(); state.searchIndex = Math.min(max, state.searchIndex + 1); renderSearchResults(); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); state.searchIndex = Math.max(0, state.searchIndex - 1); renderSearchResults(); }
+    else if (event.key === 'Enter') { event.preventDefault(); if (state.searchIndex >= 0) pickRecord(state.searchIndex); }
+    else if (event.key === 'Escape') hideSearchResults();
   });
-
   el.searchResults?.addEventListener('mousedown', (event) => {
     const item = event.target.closest('.search-item');
     if (!item) return;
     pickRecord(Number(item.dataset.index));
   });
-
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('.search-field')) hideSearchResults();
-  });
-
+  document.addEventListener('click', (event) => { if (!event.target.closest('.search-field')) hideSearchResults(); });
   document.addEventListener('keydown', (event) => {
     const tag = document.activeElement?.tagName || '';
-    if ((event.key === 'Delete' || event.key === 'Backspace') &&
-        state.selectedOverlayId &&
-        tag !== 'TEXTAREA' &&
-        tag !== 'INPUT') {
+    if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedOverlayId && tag !== 'TEXTAREA' && tag !== 'INPUT') {
       state.overlays = state.overlays.filter(item => item.id !== state.selectedOverlayId);
       state.selectedOverlayId = state.overlays[0]?.id || '';
       renderPdfPages();
       markDirty();
     }
   });
-
   el.refreshBtn?.addEventListener('click', () => refreshDirectory(true).catch(console.error));
-  el.syncBtn?.addEventListener('click', async () => {
-    if (state.selectedRecord) await loadRecord(state.selectedRecord);
-  });
+  el.syncBtn?.addEventListener('click', async () => { if (state.selectedRecord) await loadRecord(state.selectedRecord); });
   el.printBtn?.addEventListener('click', printCurrent);
-  el.zoomInBtn?.addEventListener('click', async () => {
-    state.zoom = Math.min(2.8, state.zoom + 0.1);
-    await renderPdfPages();
-  });
-  el.zoomOutBtn?.addEventListener('click', async () => {
-    state.zoom = Math.max(0.7, state.zoom - 0.1);
-    await renderPdfPages();
-  });
+  el.zoomInBtn?.addEventListener('click', async () => { state.zoom = Math.min(2.8, state.zoom + 0.1); await renderPdfPages(); });
+  el.zoomOutBtn?.addEventListener('click', async () => { state.zoom = Math.max(0.7, state.zoom - 0.1); await renderPdfPages(); });
   el.settingsBtn?.addEventListener('click', openSettings);
   document.querySelectorAll('[data-close-settings]').forEach(node => node.addEventListener('click', closeSettings));
   el.saveSettingsBtn?.addEventListener('click', saveUiSettings);
-  el.resetLogoBtn?.addEventListener('click', () => {
-    if (el.brandLogo) el.brandLogo.src = './hoplun.jpg';
-    if (el.logoInput) el.logoInput.value = '';
-    saveUiSettings();
-  });
+  el.resetLogoBtn?.addEventListener('click', () => { if (el.brandLogo) el.brandLogo.src = './hoplun.jpg'; if (el.logoInput) el.logoInput.value = ''; saveUiSettings(); });
 }
 async function init() {
   bindEvents();
   loadUiSettings();
-
+  hideSubtitleAndPremiumButtons();
   if (!pdfjsLib) {
     setDbState('error', 'PDF.js gagal dimuat');
     setStatus('Library PDF.js gagal dimuat.');
     return;
   }
-
   try {
     const hadCache = loadCache();
     await refreshDirectory(!hadCache);
-
     const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);
-  } catch (error) {
-    console.error(error);
-  }
+  } catch (error) { console.error(error); }
 }
 init();
