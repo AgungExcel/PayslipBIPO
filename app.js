@@ -1,7 +1,8 @@
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v1';
+const CACHE_KEY = 'payslip_bip_list_cache_v2';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
+const CACHE_TTL_MS = 1000 * 60 * 10;
 const pdfjsLib = globalThis.pdfjsLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.mjs';
 
@@ -14,7 +15,7 @@ const state = {
   pdfBytes: null,
   previewBytes: null,
   pdfDoc: null,
-  zoom: 1.25,
+  zoom: 1.28,
   overlays: [],
   selectedOverlayId: '',
   autosaveTimer: null,
@@ -22,6 +23,8 @@ const state = {
   isSaving: false,
   pagesMeta: [],
   searchIndex: -1,
+  cacheLoaded: false,
+  lastListAt: 0,
 };
 
 const el = {
@@ -65,7 +68,7 @@ function apiUrl(action, params = {}) {
   return url.toString();
 }
 async function apiGet(action, params = {}) {
-  const res = await fetch(apiUrl(action, params));
+  const res = await fetch(apiUrl(action, params), { cache: 'no-store' });
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = JSON.parse(text);
@@ -108,13 +111,16 @@ function loadCache() {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
+    const age = Date.now() - Number(parsed.at || 0);
     state.periods = parsed.periods || [];
     state.records = parsed.records || [];
+    state.lastListAt = parsed.at || 0;
     state.selectedPeriod = state.selectedPeriod || state.periods[0] || '';
+    state.cacheLoaded = true;
     renderPeriods();
     filterRecords();
-    setDbState('connected', 'Terhubung (cache)');
-    setStatus('Daftar file dimuat dari cache lokal');
+    setDbState('connected', age <= CACHE_TTL_MS ? 'Terhubung (cache cepat)' : 'Terhubung (cache lama)');
+    setStatus(age <= CACHE_TTL_MS ? 'Daftar file dimuat instan dari cache lokal' : 'Cache lokal dimuat, sedang cek update');
     return !!state.records.length;
   } catch {
     return false;
@@ -198,7 +204,7 @@ function markDirty() {
   state.isDirty = true;
   setStatus('Perubahan terdeteksi, autosave berjalan...');
   if (state.autosaveTimer) clearTimeout(state.autosaveTimer);
-  state.autosaveTimer = setTimeout(() => savePdf(true), 1200);
+  state.autosaveTimer = setTimeout(() => savePdf(true), 700);
 }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function pickRecord(index) {
@@ -207,6 +213,10 @@ function pickRecord(index) {
   el.searchInput.value = `${record.employeeId || ''} - ${record.employeeName || ''}`.trim();
   hideSearchResults();
   loadRecord(record);
+}
+function fitTextAreaSize(area, editor, scale) {
+  editor.style.width = `${Math.max(12, area.width * scale)}px`;
+  editor.style.height = `${Math.max(12, area.height * scale)}px`;
 }
 function makeOverlayNode(area, pageMeta) {
   const scale = pageMeta.scale;
@@ -224,20 +234,32 @@ function makeOverlayNode(area, pageMeta) {
   chip.textContent = area.label || 'Text';
   overlay.appendChild(chip);
 
-  const textarea = document.createElement('textarea');
-  textarea.value = area.text || '';
-  textarea.style.fontSize = `${Math.max(8, area.fontSize * scale)}px`;
-  textarea.addEventListener('mousedown', ev => ev.stopPropagation());
-  textarea.addEventListener('input', () => {
-    area.text = textarea.value;
-    overlay.style.height = `${Math.max(area.height * scale, textarea.scrollHeight)}px`;
-    markDirty();
+  const editor = document.createElement('textarea');
+  editor.className = 'overlay-editor';
+  editor.spellcheck = false;
+  editor.value = area.text || '';
+  editor.style.fontSize = `${Math.max(8, area.fontSize * scale)}px`;
+  fitTextAreaSize(area, editor, scale);
+
+  editor.addEventListener('mousedown', ev => {
+    ev.stopPropagation();
+    state.selectedOverlayId = area.id;
+    overlay.classList.add('active');
   });
-  textarea.addEventListener('focus', () => {
+  editor.addEventListener('focus', () => {
     state.selectedOverlayId = area.id;
     renderPdfPages();
   });
-  overlay.appendChild(textarea);
+  editor.addEventListener('input', () => {
+    area.text = editor.value;
+    const minHeightPdf = 12;
+    const pxHeight = Math.max(editor.scrollHeight + 2, minHeightPdf * scale);
+    area.height = Math.max(minHeightPdf, pxHeight / scale);
+    fitTextAreaSize(area, editor, scale);
+    overlay.style.height = `${area.height * scale}px`;
+    markDirty();
+  });
+  overlay.appendChild(editor);
 
   const handle = document.createElement('div');
   handle.className = 'resize-handle';
@@ -256,7 +278,7 @@ function makeOverlayNode(area, pageMeta) {
       if (resizing) {
         area.width = clamp(startArea.width + dx, 18, pageMeta.widthPdf - area.x);
         area.height = clamp(startArea.height + dy, 12, pageMeta.heightPdf - area.y);
-      } else if (event.target !== textarea) {
+      } else if (event.target !== editor) {
         area.x = clamp(startArea.x + dx, 0, pageMeta.widthPdf - area.width);
         area.y = clamp(startArea.y + dy, 0, pageMeta.heightPdf - area.height);
       }
@@ -267,7 +289,7 @@ function makeOverlayNode(area, pageMeta) {
       window.removeEventListener('mouseup', onUp);
       markDirty();
     }
-    if (event.target !== textarea) {
+    if (event.target !== editor) {
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     }
@@ -283,28 +305,44 @@ async function renderPdfPages() {
   const activeId = state.selectedOverlayId;
   el.pdfContainer.innerHTML = '';
   state.pagesMeta = [];
+  const outputScale = Math.min(2.2, Math.max(1.5, window.devicePixelRatio || 1.5));
   for (let pageNumber = 1; pageNumber <= state.pdfDoc.numPages; pageNumber++) {
     const page = await state.pdfDoc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: state.zoom });
+    const cssViewport = page.getViewport({ scale: state.zoom });
+    const renderViewport = page.getViewport({ scale: state.zoom * outputScale });
     const viewportPdf = page.getViewport({ scale: 1 });
+
     const wrap = document.createElement('div');
     wrap.className = 'page-wrap';
-    wrap.style.width = `${viewport.width}px`;
-    wrap.style.height = `${viewport.height}px`;
+    wrap.style.width = `${cssViewport.width}px`;
+    wrap.style.height = `${cssViewport.height}px`;
 
     const canvas = document.createElement('canvas');
     canvas.className = 'page-canvas';
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    canvas.width = Math.floor(renderViewport.width);
+    canvas.height = Math.floor(renderViewport.height);
+    canvas.style.width = `${cssViewport.width}px`;
+    canvas.style.height = `${cssViewport.height}px`;
+    const ctx = canvas.getContext('2d', { alpha: false });
     wrap.appendChild(canvas);
 
     const overlayNode = document.createElement('div');
     overlayNode.className = 'page-overlay';
     wrap.appendChild(overlayNode);
 
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    await page.render({
+      canvasContext: ctx,
+      viewport: renderViewport,
+      transform: null
+    }).promise;
 
-    const pageMeta = { pageNumber, scale: viewport.width / viewportPdf.width, widthPdf: viewportPdf.width, heightPdf: viewportPdf.height, overlayNode };
+    const pageMeta = {
+      pageNumber,
+      scale: cssViewport.width / viewportPdf.width,
+      widthPdf: viewportPdf.width,
+      heightPdf: viewportPdf.height,
+      overlayNode
+    };
     state.pagesMeta.push(pageMeta);
 
     overlayNode.addEventListener('dblclick', (event) => {
@@ -312,14 +350,28 @@ async function renderPdfPages() {
       const x = (event.clientX - rect.left) / pageMeta.scale;
       const y = (event.clientY - rect.top) / pageMeta.scale;
       const id = `area_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      state.overlays.push({ id, page: pageNumber, label: 'Text Baru', text: '', x: clamp(x, 0, pageMeta.widthPdf - 120), y: clamp(y, 0, pageMeta.heightPdf - 22), width: 120, height: 22, fontSize: 12 });
+      state.overlays.push({
+        id,
+        page: pageNumber,
+        label: 'Text Baru',
+        text: '',
+        x: clamp(x, 0, pageMeta.widthPdf - 140),
+        y: clamp(y, 0, pageMeta.heightPdf - 22),
+        width: 140,
+        height: 20,
+        fontSize: 12
+      });
       state.selectedOverlayId = id;
-      renderPdfPages();
+      renderPdfPages().then(() => {
+        overlayNode.querySelector(`.overlay-box[data-id="${id}"] .overlay-editor`)?.focus();
+      });
       markDirty();
-      setTimeout(() => overlayNode.querySelector(`.overlay-box[data-id="${id}"] textarea`)?.focus(), 50);
     });
 
-    state.overlays.filter(area => Number(area.page) === pageNumber).forEach(area => overlayNode.appendChild(makeOverlayNode(area, pageMeta)));
+    state.overlays
+      .filter(area => Number(area.page) === pageNumber)
+      .forEach(area => overlayNode.appendChild(makeOverlayNode(area, pageMeta)));
+
     el.pdfContainer.appendChild(wrap);
   }
   state.selectedOverlayId = activeId || state.selectedOverlayId;
@@ -344,14 +396,20 @@ async function loadRecord(record) {
   setStatus('Preview PDF asli siap');
 }
 async function refreshDirectory(force = false) {
-  setDbState('loading', 'Menghubungkan database...');
-  setStatus('Memuat daftar file dari folder Google Drive...');
+  const shouldUseCacheFirst = !force && state.records.length;
+  if (!shouldUseCacheFirst) {
+    setDbState('loading', 'Menghubungkan database...');
+    setStatus('Memuat daftar file dari folder Google Drive...');
+  } else {
+    setDbState('connected', 'Terhubung (cache cepat)');
+    setStatus('Daftar file dari cache tampil, sedang cek update terbaru...');
+  }
   const startedAt = performance.now();
   try {
     const json = await apiGet('list');
     state.periods = json.periods || [];
     state.records = json.files || [];
-    state.selectedPeriod = state.periods[0] || '';
+    state.selectedPeriod = state.selectedPeriod && state.periods.includes(state.selectedPeriod) ? state.selectedPeriod : (state.periods[0] || '');
     renderPeriods();
     filterRecords();
     saveCache();
@@ -374,9 +432,9 @@ async function buildEditedPdfBytes() {
     if (!page) return;
     const size = page.getSize();
     const drawY = size.height - area.y - area.height;
-    page.drawRectangle({ x: area.x, y: drawY, width: area.width, height: area.height, color: rgb(1,1,1), opacity: 0.98 });
+    page.drawRectangle({ x: area.x, y: drawY, width: area.width, height: area.height, color: rgb(1,1,1), opacity: 0.985 });
     const lines = String(area.text || '').split(/\n/);
-    const maxChars = Math.max(1, Math.floor(area.width / (area.fontSize * 0.55)));
+    const maxChars = Math.max(1, Math.floor(area.width / Math.max(1, area.fontSize * 0.52)));
     const wrapped = [];
     lines.forEach(line => {
       if (line.length <= maxChars) wrapped.push(line);
@@ -386,8 +444,15 @@ async function buildEditedPdfBytes() {
         if (cursor) wrapped.push(cursor);
       }
     });
-    wrapped.slice(0, Math.max(1, Math.floor(area.height / (area.fontSize + 2)))).forEach((line, idx) => {
-      page.drawText(line, { x: area.x + 1, y: drawY + area.height - area.fontSize - 1 - (idx * (area.fontSize + 1)), font, size: area.fontSize, color: rgb(0,0,0), maxWidth: area.width - 2 });
+    wrapped.slice(0, Math.max(1, Math.floor(area.height / (area.fontSize + 1.5)))).forEach((line, idx) => {
+      page.drawText(line, {
+        x: area.x + 1,
+        y: drawY + area.height - area.fontSize - 1 - (idx * (area.fontSize + 1)),
+        font,
+        size: area.fontSize,
+        color: rgb(0,0,0),
+        maxWidth: area.width - 2
+      });
     });
   });
   return await pdfDoc.save();
@@ -398,18 +463,24 @@ async function savePdf(isAuto = false) {
   setStatus(isAuto ? 'Autosave: menyimpan PDF...' : 'Menyimpan PDF...');
   try {
     const edited = await buildEditedPdfBytes();
+    const overlaysCopy = structuredClone(state.overlays);
     await apiPost('overwrite', {
       fileId: state.selectedRecord.fileId,
       fileName: state.selectedRecord.fileName,
       mimeType: 'application/pdf',
       base64: bytesToBase64(edited),
-      overlays: state.overlays,
-      record: { ...state.selectedRecord, overlays: state.overlays },
+      overlays: overlaysCopy,
+      record: { ...state.selectedRecord, overlays: overlaysCopy },
     });
     state.pdfBytes = new Uint8Array(edited);
     state.previewBytes = state.pdfBytes.slice();
+    state.selectedRecord.overlays = overlaysCopy;
+    const recordIndex = state.records.findIndex(item => item.fileId === state.selectedRecord.fileId);
+    if (recordIndex >= 0) state.records[recordIndex] = { ...state.records[recordIndex], overlays: overlaysCopy };
+    saveCache();
     state.isDirty = false;
     setStatus(isAuto ? 'Autosave selesai' : 'PDF berhasil disimpan');
+    await loadPdfBytes(state.previewBytes);
   } catch (error) {
     console.error(error);
     setStatus(`Gagal simpan: ${error.message}`);
@@ -424,7 +495,14 @@ async function printCurrent() {
   const url = URL.createObjectURL(blob);
   const win = window.open(url, '_blank');
   if (win) {
-    win.addEventListener('load', () => { win.focus(); win.print(); });
+    const tryPrint = () => {
+      try {
+        win.focus();
+        win.print();
+      } catch {}
+    };
+    setTimeout(tryPrint, 500);
+    setTimeout(tryPrint, 1200);
   }
 }
 function bindEvents() {
@@ -432,7 +510,10 @@ function bindEvents() {
     state.selectedPeriod = el.periodSelect.value;
     if (el.searchInput.value.trim()) renderSearchResults();
   });
-  el.searchInput.addEventListener('input', renderSearchResults);
+  el.searchInput.addEventListener('input', () => {
+    state.searchIndex = -1;
+    renderSearchResults();
+  });
   el.searchInput.addEventListener('focus', renderSearchResults);
   el.searchInput.addEventListener('keydown', (event) => {
     if (el.searchResults.classList.contains('hidden')) return;
@@ -461,7 +542,8 @@ function bindEvents() {
     if (!event.target.closest('.search-field')) hideSearchResults();
   });
   document.addEventListener('keydown', (event) => {
-    if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedOverlayId && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') {
+    const tag = document.activeElement?.tagName || '';
+    if ((event.key === 'Delete' || event.key === 'Backspace') && state.selectedOverlayId && tag !== 'TEXTAREA' && tag !== 'INPUT') {
       state.overlays = state.overlays.filter(item => item.id !== state.selectedOverlayId);
       state.selectedOverlayId = state.overlays[0]?.id || '';
       renderPdfPages();
@@ -471,7 +553,7 @@ function bindEvents() {
   el.refreshBtn.addEventListener('click', () => refreshDirectory(true));
   el.syncBtn.addEventListener('click', async () => { if (state.selectedRecord) await loadRecord(state.selectedRecord); });
   el.printBtn.addEventListener('click', printCurrent);
-  el.zoomInBtn.addEventListener('click', async () => { state.zoom = Math.min(2.5, state.zoom + 0.1); await renderPdfPages(); });
+  el.zoomInBtn.addEventListener('click', async () => { state.zoom = Math.min(2.8, state.zoom + 0.1); await renderPdfPages(); });
   el.zoomOutBtn.addEventListener('click', async () => { state.zoom = Math.max(0.7, state.zoom - 0.1); await renderPdfPages(); });
   el.settingsBtn.addEventListener('click', openSettings);
   document.querySelectorAll('[data-close-settings]').forEach(node => node.addEventListener('click', closeSettings));
@@ -486,11 +568,17 @@ async function init() {
   bindEvents();
   loadUiSettings();
   try {
-    if (APPS_SCRIPT_URL.includes('PASTE_YOUR_APPS_SCRIPT')) {
+    if (!APPS_SCRIPT_URL) {
       setStatus('Isi dulu APPS_SCRIPT_URL di app.js');
       return;
     }
-    loadCache();
+    const hadCache = loadCache();
+    if (hadCache) {
+      const firstCached = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
+      if (firstCached) loadRecord(firstCached).catch(console.error);
+      refreshDirectory(false).catch(console.error);
+      return;
+    }
     await refreshDirectory();
     const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);

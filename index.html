@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Payslip BIPO</title>
+  <title>Payslip BIP</title>
   <link rel="icon" type="image/png" href="./favicon-bipo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,7 +41,7 @@
         </div>
         <div class="toolbar two-col compact-actions">
           <button id="refreshBtn" class="btn btn-light">↻ Refresh</button>
-          <button id="syncBtn" class="btn btn-light">⟳ Reload</button>
+          <button id="syncBtn" class="btn btn-light">⟳ Reload Preview</button>
         </div>
       </section>
 
@@ -57,7 +57,7 @@
       <div class="preview-toolbar">
         <div class="toolbar-title-group">
           <div class="toolbar-title">Preview Payslip</div>
-          <div class="toolbar-subtitle">Klik area teks untuk edit langsung. Double click area kosong untuk tambah area baru.</div>
+          <div class="toolbar-subtitle">Klik area edit untuk mengetik. Double click area kosong untuk tambah teks baru.</div>
         </div>
         <div class="right-actions">
           <span id="pageInfo">Page 1 / 1</span>
@@ -95,6 +95,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
