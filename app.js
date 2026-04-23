@@ -1,7 +1,7 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v12';
+const CACHE_KEY = 'payslip_bip_list_cache_v13';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -157,15 +157,11 @@ function recordMatchesQuery(record, rawQuery) {
   if (qDigits) {
     const numericHaystacks = [
       digitsOnly(displayId),
-      digitsOnly(displayName),
       digitsOnly(fileName),
       digitsOnly(employeeId),
     ].filter(Boolean);
 
     if (numericHaystacks.some(v => v.includes(qDigits))) return true;
-
-    const srDigits = digitsOnly(displayId);
-    if (srDigits && (srDigits.startsWith(qDigits) || qDigits.startsWith(srDigits))) return true;
   }
 
   return false;
@@ -217,7 +213,6 @@ function getSearchRows(){
   const rawQuery = String(el.searchInput?.value || '').trim();
   return state.records.filter(record => {
     if (state.selectedYear && String(record.year || '') !== String(state.selectedYear)) return false;
-    if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     return recordMatchesQuery(record, rawQuery);
   }).slice(0, 20);
 }
@@ -374,6 +369,9 @@ async function printCurrent(){
 }
 async function pickRecord(index){
   const record = state.filteredRecords[index]; if (!record) return;
+  state.selectedPeriod = record.periodLabel || state.selectedPeriod;
+  renderPeriodOptions();
+  applyPeriodColors();
   if (el.searchInput) el.searchInput.value = `${getDisplayId(record) || ''} - ${getDisplayName(record) || ''}`.trim();
   hideSearchResults();
   await loadRecord(record);
