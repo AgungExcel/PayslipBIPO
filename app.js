@@ -1,7 +1,7 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v10';
+const CACHE_KEY = 'payslip_bip_list_cache_v11';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -105,6 +105,23 @@ function extractSrId(record){
   }
   return '';
 }
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+function extractSearchNumbers(record) {
+  const values = new Set();
+  const srId = extractSrId(record);
+  const srDigits = digitsOnly(srId);
+  if (srDigits) values.add(srDigits);
+
+  const employeeIdDigits = digitsOnly(record?.employeeId);
+  if (employeeIdDigits) values.add(employeeIdDigits);
+
+  const fileNameDigits = digitsOnly(record?.fileName);
+  if (fileNameDigits) values.add(fileNameDigits);
+
+  return [...values];
+}
 function extractDisplayName(record){
   const explicitName = String(record?.employeeName || record?.name || '').trim();
   if (explicitName) return explicitName;
@@ -175,12 +192,22 @@ function renderPeriodOptions() {
   el.periodSelect.value = state.selectedPeriod || periods[0] || '';
 }
 function getSearchRows(){
-  const q = normalize(el.searchInput?.value || '');
+  const rawQuery = String(el.searchInput?.value || '').trim();
+  const q = normalize(rawQuery);
+  const qDigits = digitsOnly(rawQuery);
+
   return state.records.filter(record => {
     if (state.selectedYear && String(record.year || '') !== String(state.selectedYear)) return false;
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     if (!q) return false;
-    return normalize(getDisplayId(record)).includes(q) || normalize(getDisplayName(record)).includes(q);
+
+    const byName = normalize(getDisplayName(record)).includes(q);
+    const bySr = normalize(getDisplayId(record)).includes(q);
+    const byNumeric = qDigits
+      ? extractSearchNumbers(record).some(num => num.includes(qDigits) || qDigits.includes(num))
+      : false;
+
+    return byName || bySr || byNumeric;
   }).slice(0, 12);
 }
 function renderSearchResults(){
@@ -392,7 +419,6 @@ async function init(){
   try {
     loadCache();
     await fetchYearData(state.selectedYear || '', false);
-    applyPeriodColors();
     const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);
   } catch (error) { console.error(error); setStatus(`Error: ${error.message}`); }
