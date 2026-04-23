@@ -1,16 +1,26 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v8';
+const CACHE_KEY = 'payslip_bip_list_cache_v9';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const state = {
-  years: [], periods: [], records: [], filteredRecords: [],
-  selectedYear: '', selectedPeriod: '', selectedRecord: null,
-  previewBytes: null, pdfDoc: null, zoom: 1.2, searchIndex: -1, printFrame: null,
+  years: [],
+  periods: [],
+  records: [],
+  filteredRecords: [],
+  selectedYear: '',
+  selectedPeriod: '',
+  selectedRecord: null,
+  previewBytes: null,
+  pdfDoc: null,
+  zoom: 1.2,
+  searchIndex: -1,
+  printFrame: null,
 };
+
 const el = {
   yearSelect: document.getElementById('yearSelect'),
   periodSelect: document.getElementById('periodSelect'),
@@ -65,25 +75,35 @@ async function apiGet(action, params = {}, timeoutMs = 7000) {
     clearTimeout(timer);
   }
 }
-function parseBase64(base64){ const b = atob(base64); const bytes = new Uint8Array(b.length); for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i); return bytes; }
+function parseBase64(base64){
+  const b = atob(base64);
+  const bytes = new Uint8Array(b.length);
+  for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i);
+  return bytes;
+}
 function saveCache(){
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      at: Date.now(), years: state.years, selectedYear: state.selectedYear,
-      periods: state.periods, records: state.records
+      at: Date.now(),
+      years: state.years,
+      selectedYear: state.selectedYear,
+      periods: state.periods,
+      records: state.records
     }));
   } catch {}
 }
 function loadCache(){
   try {
-    const raw = localStorage.getItem(CACHE_KEY); if (!raw) return false;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return false;
     const parsed = JSON.parse(raw);
     state.years = parsed.years || [];
-    state.selectedYear = parsed.selectedYear || parsed.years?.[parsed.years.length - 1] || '';
+    state.selectedYear = parsed.selectedYear || '';
     state.periods = parsed.periods || [];
     state.records = parsed.records || [];
-    state.selectedPeriod = state.selectedPeriod || state.periods[0] || '';
-    renderYearOptions(); renderPeriodOptions();
+    normalizeYearState();
+    renderYearOptions();
+    renderPeriodOptions();
     setDbState('connected', 'Terhubung (cache cepat)');
     setStatus('Daftar file dimuat instan dari index cache');
     return !!state.records.length;
@@ -91,7 +111,10 @@ function loadCache(){
 }
 function extractSrId(record){
   const candidates = [record?.employeeId, record?.employeeCode, record?.srId, record?.fileName].filter(Boolean);
-  for (const value of candidates) { const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/); if (match) return match[0]; }
+  for (const value of candidates) {
+    const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/);
+    if (match) return match[0];
+  }
   return '';
 }
 function extractDisplayName(record){
@@ -101,6 +124,25 @@ function extractDisplayName(record){
   const match = fileName.match(/^[^-]+-(SR[0-9]{5,})-(.+?)-ID[0-9]{8}-Payslip\.pdf$/i);
   if (match && match[2]) return match[2].replace(/[-_]+/g, ' ').trim();
   return '';
+}
+function extractYearFromText(text){
+  const match = String(text || '').match(/\b(20\d{2})\b/);
+  return match ? match[1] : '';
+}
+function deriveYearsFromRecords(records){
+  return [...new Set((records || []).map(r => String(r.year || extractYearFromText(r.periodLabel) || extractYearFromText(r.fileName) || '')).filter(Boolean))].sort();
+}
+function normalizeYearState(){
+  state.records = (state.records || []).map(r => ({ ...r, year: String(r.year || extractYearFromText(r.periodLabel) || extractYearFromText(r.fileName) || '') }));
+  if (!state.years.length) state.years = deriveYearsFromRecords(state.records);
+  if (!state.selectedYear || !state.years.includes(state.selectedYear)) state.selectedYear = state.years[state.years.length - 1] || '';
+  state.periods = [...new Set(
+    state.records
+      .filter(r => !state.selectedYear || String(r.year || '') === String(state.selectedYear))
+      .map(r => r.periodLabel)
+      .filter(Boolean)
+  )].sort();
+  if (!state.periods.includes(state.selectedPeriod)) state.selectedPeriod = state.periods[0] || '';
 }
 function getDisplayId(record){ return extractSrId(record) || String(record?.employeeId || '').trim(); }
 function getDisplayName(record){ return extractDisplayName(record) || String(record?.employeeName || '').trim(); }
@@ -137,19 +179,20 @@ function closeSettings() { el.settingsModal?.classList.add('hidden'); }
 
 function renderYearOptions() {
   if (!el.yearSelect) return;
-  el.yearSelect.innerHTML = state.years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join('');
-  if (state.years.length && !state.selectedYear) state.selectedYear = state.years[state.years.length - 1];
-  el.yearSelect.value = state.selectedYear;
+  const years = state.years.length ? state.years : [''];
+  el.yearSelect.innerHTML = years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year || 'Pilih Tahun')}</option>`).join('');
+  el.yearSelect.value = state.selectedYear || years[0] || '';
 }
 function renderPeriodOptions() {
   if (!el.periodSelect) return;
-  el.periodSelect.innerHTML = state.periods.map(period => `<option value="${escapeHtml(period)}">${escapeHtml(period)}</option>`).join('');
-  if (state.periods.length && !state.selectedPeriod) state.selectedPeriod = state.periods[0];
-  el.periodSelect.value = state.selectedPeriod;
+  const periods = state.periods.length ? state.periods : [''];
+  el.periodSelect.innerHTML = periods.map(period => `<option value="${escapeHtml(period)}">${escapeHtml(period || 'Pilih Periode')}</option>`).join('');
+  el.periodSelect.value = state.selectedPeriod || periods[0] || '';
 }
 function getSearchRows(){
   const q = normalize(el.searchInput?.value || '');
   return state.records.filter(record => {
+    if (state.selectedYear && String(record.year || '') !== String(state.selectedYear)) return false;
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     if (!q) return false;
     return normalize(getDisplayId(record)).includes(q) || normalize(getDisplayName(record)).includes(q);
@@ -157,13 +200,14 @@ function getSearchRows(){
 }
 function renderSearchResults(){
   if (!el.searchResults) return;
-  const rows = getSearchRows(); state.filteredRecords = rows;
+  const rows = getSearchRows();
+  state.filteredRecords = rows;
   if (!rows.length){ el.searchResults.innerHTML=''; el.searchResults.classList.add('hidden'); return; }
   if (state.searchIndex < 0 || state.searchIndex > rows.length - 1) state.searchIndex = 0;
   el.searchResults.innerHTML = rows.map((record, index) => `
     <div class="search-item ${index === state.searchIndex ? 'active' : ''}" data-index="${index}">
       <div class="search-item-title">${escapeHtml(getDisplayId(record) || '-')} - ${escapeHtml(getDisplayName(record) || '-')}</div>
-      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')}</div>
+      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')} • ${escapeHtml(record.year || '-')}</div>
     </div>`).join('');
   el.searchResults.classList.remove('hidden');
 }
@@ -188,10 +232,15 @@ async function loadPdfBytes(bytes){
   const cssViewport = page.getViewport({ scale: state.zoom });
   const renderViewport = page.getViewport({ scale: state.zoom * scaleRender });
   const wrap = document.createElement('div');
-  wrap.className='page-wrap'; wrap.style.width=`${cssViewport.width}px`; wrap.style.height=`${cssViewport.height}px`;
+  wrap.className='page-wrap';
+  wrap.style.width=`${cssViewport.width}px`;
+  wrap.style.height=`${cssViewport.height}px`;
   const canvas = document.createElement('canvas');
-  canvas.className='page-canvas'; canvas.width=Math.floor(renderViewport.width); canvas.height=Math.floor(renderViewport.height);
-  canvas.style.width=`${cssViewport.width}px`; canvas.style.height=`${cssViewport.height}px`;
+  canvas.className='page-canvas';
+  canvas.width=Math.floor(renderViewport.width);
+  canvas.height=Math.floor(renderViewport.height);
+  canvas.style.width=`${cssViewport.width}px`;
+  canvas.style.height=`${cssViewport.height}px`;
   const ctx = canvas.getContext('2d', { alpha:false });
   await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
   if (el.pdfContainer){ el.pdfContainer.innerHTML=''; wrap.appendChild(canvas); el.pdfContainer.appendChild(wrap); }
@@ -199,21 +248,29 @@ async function loadPdfBytes(bytes){
 }
 async function loadRecord(record){
   try {
-    state.selectedRecord = record; syncMetaPanel(); setStatus('Mengambil PDF asli...');
+    state.selectedRecord = record;
+    syncMetaPanel();
+    setStatus('Mengambil PDF asli...');
     const json = await apiGet('file', { fileId: record.fileId }, 10000);
-    state.previewBytes = parseBase64(json.base64); await loadPdfBytes(state.previewBytes); setStatus('Preview PDF asli siap');
-  } catch (error) { console.error(error); setStatus(`Gagal memuat PDF: ${error.message}`); }
+    state.previewBytes = parseBase64(json.base64);
+    await loadPdfBytes(state.previewBytes);
+    setStatus('Preview PDF asli siap');
+  } catch (error) {
+    console.error(error);
+    setStatus(`Gagal memuat PDF: ${error.message}`);
+  }
 }
 async function fetchYearData(year, force = false){
   setDbState('loading', 'Menghubungkan database...');
   setStatus(force ? `Menyegarkan index ${year || 'semua'}...` : `Memuat data ${year || 'terbaru'}...`);
   const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' }, force ? 30000 : 7000);
   state.years = json.years || [];
-  state.selectedYear = json.selectedYear || year;
-  state.periods = json.periods || [];
+  state.selectedYear = json.selectedYear || year || state.selectedYear;
   state.records = json.files || [];
-  if (!state.periods.includes(state.selectedPeriod)) state.selectedPeriod = state.periods[0] || '';
-  renderYearOptions(); renderPeriodOptions(); saveCache();
+  normalizeYearState();
+  renderYearOptions();
+  renderPeriodOptions();
+  saveCache();
   setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
   setStatus(json.needsRefresh ? (json.message || 'Index belum ada, klik Refresh') : `Daftar ${state.selectedYear || '-'} siap • ${state.records.length} file`);
 }
@@ -253,10 +310,17 @@ async function pickRecord(index){
 }
 function bindEvents(){
   el.yearSelect?.addEventListener('change', async () => {
-    state.selectedYear = el.yearSelect.value; state.selectedPeriod = ''; state.searchIndex = -1; hideSearchResults();
+    state.selectedYear = el.yearSelect.value;
+    state.selectedPeriod = '';
+    state.searchIndex = -1;
+    hideSearchResults();
     await fetchYearData(state.selectedYear, false);
   });
-  el.periodSelect?.addEventListener('change', () => { state.selectedPeriod = el.periodSelect.value; state.searchIndex = -1; renderSearchResults(); });
+  el.periodSelect?.addEventListener('change', () => {
+    state.selectedPeriod = el.periodSelect.value;
+    state.searchIndex = -1;
+    renderSearchResults();
+  });
   el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
   el.searchInput?.addEventListener('focus', renderSearchResults);
   el.searchInput?.addEventListener('keydown', async (event) => {
@@ -281,7 +345,9 @@ function bindEvents(){
   el.resetLogoBtn?.addEventListener('click', () => { if (el.brandLogo) el.brandLogo.src='./hoplun.jpg'; if (el.logoInput) el.logoInput.value=''; saveUiSettings(); });
 }
 async function init(){
-  bindEvents(); loadUiSettings(); hideSubtitleAndPremiumButtons();
+  bindEvents();
+  loadUiSettings();
+  hideSubtitleAndPremiumButtons();
   if (!pdfjsLib){ setDbState('error','PDF.js gagal dimuat'); setStatus('Library PDF.js gagal dimuat.'); return; }
   try {
     loadCache();
