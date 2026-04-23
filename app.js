@@ -1,7 +1,7 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v11';
+const CACHE_KEY = 'payslip_bip_list_cache_v12';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -108,20 +108,6 @@ function extractSrId(record){
 function digitsOnly(value) {
   return String(value || '').replace(/\D/g, '');
 }
-function extractSearchNumbers(record) {
-  const values = new Set();
-  const srId = extractSrId(record);
-  const srDigits = digitsOnly(srId);
-  if (srDigits) values.add(srDigits);
-
-  const employeeIdDigits = digitsOnly(record?.employeeId);
-  if (employeeIdDigits) values.add(employeeIdDigits);
-
-  const fileNameDigits = digitsOnly(record?.fileName);
-  if (fileNameDigits) values.add(fileNameDigits);
-
-  return [...values];
-}
 function extractDisplayName(record){
   const explicitName = String(record?.employeeName || record?.name || '').trim();
   if (explicitName) return explicitName;
@@ -148,6 +134,42 @@ function normalizeYearState(){
 }
 function getDisplayId(record){ return extractSrId(record) || String(record?.employeeId || '').trim(); }
 function getDisplayName(record){ return extractDisplayName(record) || String(record?.employeeName || '').trim(); }
+
+function recordMatchesQuery(record, rawQuery) {
+  const q = normalize(rawQuery);
+  const qDigits = digitsOnly(rawQuery);
+  if (!q) return false;
+
+  const displayId = getDisplayId(record);
+  const displayName = getDisplayName(record);
+  const fileName = String(record?.fileName || '');
+  const employeeId = String(record?.employeeId || '');
+
+  const textHaystacks = [
+    normalize(displayId),
+    normalize(displayName),
+    normalize(fileName),
+    normalize(employeeId),
+  ];
+
+  if (textHaystacks.some(v => v.includes(q))) return true;
+
+  if (qDigits) {
+    const numericHaystacks = [
+      digitsOnly(displayId),
+      digitsOnly(displayName),
+      digitsOnly(fileName),
+      digitsOnly(employeeId),
+    ].filter(Boolean);
+
+    if (numericHaystacks.some(v => v.includes(qDigits))) return true;
+
+    const srDigits = digitsOnly(displayId);
+    if (srDigits && (srDigits.startsWith(qDigits) || qDigits.startsWith(srDigits))) return true;
+  }
+
+  return false;
+}
 
 function loadUiSettings() {
   try {
@@ -193,22 +215,11 @@ function renderPeriodOptions() {
 }
 function getSearchRows(){
   const rawQuery = String(el.searchInput?.value || '').trim();
-  const q = normalize(rawQuery);
-  const qDigits = digitsOnly(rawQuery);
-
   return state.records.filter(record => {
     if (state.selectedYear && String(record.year || '') !== String(state.selectedYear)) return false;
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
-    if (!q) return false;
-
-    const byName = normalize(getDisplayName(record)).includes(q);
-    const bySr = normalize(getDisplayId(record)).includes(q);
-    const byNumeric = qDigits
-      ? extractSearchNumbers(record).some(num => num.includes(qDigits) || qDigits.includes(num))
-      : false;
-
-    return byName || bySr || byNumeric;
-  }).slice(0, 12);
+    return recordMatchesQuery(record, rawQuery);
+  }).slice(0, 20);
 }
 function renderSearchResults(){
   if (!el.searchResults) return;
