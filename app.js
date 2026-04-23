@@ -6,35 +6,17 @@ const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-const FONT_BY_MONTH = {
-  '01': '"Trebuchet MS", "Inter", sans-serif',
-  '02': '"Georgia", serif',
-  '03': '"Verdana", "Inter", sans-serif',
-  '04': '"Palatino Linotype", serif',
-  '05': '"Tahoma", "Inter", sans-serif',
-  '06': '"Gill Sans", "Inter", sans-serif',
-  '07': '"Times New Roman", serif',
-  '08': '"Segoe UI", "Inter", sans-serif',
-  '09': '"Cambria", serif',
-  '10': '"Lucida Sans", "Inter", sans-serif',
-  '11': '"Book Antiqua", serif',
-  '12': '"Arial Rounded MT Bold", "Inter", sans-serif'
+const COLOR_BY_MONTH = {
+  '01': '#2563eb', '02': '#9333ea', '03': '#0f766e', '04': '#ea580c',
+  '05': '#dc2626', '06': '#0891b2', '07': '#7c3aed', '08': '#15803d',
+  '09': '#b45309', '10': '#be185d', '11': '#1d4ed8', '12': '#047857'
 };
 
 const state = {
-  years: [],
-  periods: [],
-  records: [],
-  filteredRecords: [],
-  selectedYear: '',
-  selectedPeriod: '',
-  selectedRecord: null,
-  previewBytes: null,
-  pdfDoc: null,
-  zoom: 1.2,
-  searchIndex: -1,
-  printFrame: null,
-  isRefreshing: false,
+  years: [], periods: [], records: [], filteredRecords: [],
+  selectedYear: '', selectedPeriod: '', selectedRecord: null,
+  previewBytes: null, pdfDoc: null, zoom: 1.2, searchIndex: -1,
+  printFrame: null, isRefreshing: false,
 };
 
 const el = {
@@ -87,31 +69,20 @@ async function apiGet(action, params = {}, timeoutMs = 7000) {
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('Request timeout. Backend terlalu lama merespons.');
     throw error;
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
-function parseBase64(base64){
-  const b = atob(base64);
-  const bytes = new Uint8Array(b.length);
-  for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i);
-  return bytes;
-}
+function parseBase64(base64){ const b = atob(base64); const bytes = new Uint8Array(b.length); for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i); return bytes; }
 function saveCache(){
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      at: Date.now(),
-      years: state.years,
-      selectedYear: state.selectedYear,
-      periods: state.periods,
-      records: state.records
+      at: Date.now(), years: state.years, selectedYear: state.selectedYear,
+      periods: state.periods, records: state.records
     }));
   } catch {}
 }
 function loadCache(){
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return false;
+    const raw = localStorage.getItem(CACHE_KEY); if (!raw) return false;
     const parsed = JSON.parse(raw);
     state.years = parsed.years || [];
     state.selectedYear = parsed.selectedYear || '';
@@ -120,7 +91,7 @@ function loadCache(){
     normalizeYearState();
     renderYearOptions();
     renderPeriodOptions();
-    applyPeriodFont();
+    applyPeriodColors();
     setDbState('connected', 'Terhubung (cache cepat)');
     setStatus('Daftar file dimuat instan dari index cache');
     return !!state.records.length;
@@ -154,10 +125,7 @@ function normalizeYearState(){
   if (!state.years.length) state.years = deriveYearsFromRecords(state.records);
   if (!state.selectedYear || !state.years.includes(state.selectedYear)) state.selectedYear = state.years[state.years.length - 1] || '';
   state.periods = [...new Set(
-    state.records
-      .filter(r => !state.selectedYear || String(r.year || '') === String(state.selectedYear))
-      .map(r => r.periodLabel)
-      .filter(Boolean)
+    state.records.filter(r => !state.selectedYear || String(r.year || '') === String(state.selectedYear)).map(r => r.periodLabel).filter(Boolean)
   )].sort();
   if (!state.periods.includes(state.selectedPeriod)) state.selectedPeriod = state.periods[0] || '';
 }
@@ -235,17 +203,34 @@ function syncMetaPanel(){
   if (el.employeeIdText) el.employeeIdText.textContent = getDisplayId(r) || '-';
   if (el.employeeNameText) el.employeeNameText.textContent = getDisplayName(r) || '-';
 }
-function applyPeriodFont() {
+function getMonthFromPeriod() {
   const match = String(state.selectedPeriod || '').match(/Payslip-(\d{2})-\d{4}/i);
-  const month = match ? match[1] : '';
-  const font = FONT_BY_MONTH[month] || '"Inter", sans-serif';
-  document.documentElement.style.setProperty('--period-font-family', font);
-  const title = document.querySelector('.toolbar-title');
-  if (title) title.style.fontFamily = font;
-  const brand = document.querySelector('.brand-left h1');
-  if (brand) brand.style.fontFamily = font;
-  if (el.periodSelect) el.periodSelect.style.fontFamily = font;
-  if (el.yearSelect) el.yearSelect.style.fontFamily = font;
+  return match ? match[1] : '';
+}
+function getPeriodColor() {
+  const month = getMonthFromPeriod();
+  return COLOR_BY_MONTH[month] || '#2563eb';
+}
+function applyPeriodColors() {
+  const color = getPeriodColor();
+  if (el.periodSelect) {
+    el.periodSelect.style.color = color;
+    el.periodSelect.style.fontWeight = '800';
+    el.periodSelect.style.borderColor = color + '55';
+    el.periodSelect.style.boxShadow = `0 0 0 3px ${color}12`;
+    el.periodSelect.style.fontFamily = '"Inter", sans-serif';
+  }
+  if (el.yearSelect) {
+    el.yearSelect.style.color = color;
+    el.yearSelect.style.fontWeight = '800';
+    el.yearSelect.style.borderColor = color + '55';
+    el.yearSelect.style.boxShadow = `0 0 0 3px ${color}12`;
+    el.yearSelect.style.fontFamily = '"Inter", sans-serif';
+  }
+  const yearLabel = document.querySelector('label[for="yearSelect"]');
+  const periodLabel = document.querySelector('label[for="periodSelect"]');
+  if (yearLabel) { yearLabel.style.color = color; yearLabel.style.fontWeight = '800'; }
+  if (periodLabel) { periodLabel.style.color = color; periodLabel.style.fontWeight = '800'; }
 }
 function hideSubtitleAndButtons(){
   const subtitle = document.querySelector('.toolbar-subtitle');
@@ -312,7 +297,7 @@ async function fetchYearData(year, force = false){
     normalizeYearState();
     renderYearOptions();
     renderPeriodOptions();
-    applyPeriodFont();
+    applyPeriodColors();
     saveCache();
     setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
     setStatus(json.needsRefresh ? (json.message || 'Index belum ada, klik Refresh') : `Daftar ${state.selectedYear || '-'} siap • ${state.records.length} file`);
@@ -366,7 +351,7 @@ function bindEvents(){
   el.periodSelect?.addEventListener('change', () => {
     state.selectedPeriod = el.periodSelect.value;
     state.searchIndex = -1;
-    applyPeriodFont();
+    applyPeriodColors();
     renderSearchResults();
   });
   el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
@@ -407,6 +392,7 @@ async function init(){
   try {
     loadCache();
     await fetchYearData(state.selectedYear || '', false);
+    applyPeriodColors();
     const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);
   } catch (error) { console.error(error); setStatus(`Error: ${error.message}`); }
