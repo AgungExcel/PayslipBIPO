@@ -1,7 +1,7 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v6';
+const CACHE_KEY = 'payslip_bip_list_cache_v7';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -77,8 +77,9 @@ function saveCache(){
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       at: Date.now(),
       years: state.years,
+      selectedYear: state.selectedYear,
       periods: state.periods,
-      records: state.records,
+      records: state.records
     }));
   } catch {}
 }
@@ -88,10 +89,10 @@ function loadCache(){
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     state.years = parsed.years || [];
+    state.selectedYear = parsed.selectedYear || parsed.years?.[0] || '';
     state.periods = parsed.periods || [];
     state.records = parsed.records || [];
-    state.selectedYear = state.selectedYear || state.years[0] || '';
-    rebuildPeriodsForSelectedYear();
+    state.selectedPeriod = state.selectedPeriod || state.periods[0] || '';
     renderYearOptions();
     renderPeriodOptions();
     setDbState('connected', 'Terhubung (cache cepat)');
@@ -148,20 +149,10 @@ function saveUiSettings() {
 function openSettings() { el.settingsModal?.classList.remove('hidden'); }
 function closeSettings() { el.settingsModal?.classList.add('hidden'); }
 
-function rebuildPeriodsForSelectedYear() {
-  const periods = [...new Set(
-    state.records
-      .filter(r => !state.selectedYear || String(r.year || '') === String(state.selectedYear))
-      .map(r => r.periodLabel)
-      .filter(Boolean)
-  )].sort();
-  state.periods = periods;
-  if (!periods.includes(state.selectedPeriod)) state.selectedPeriod = periods[0] || '';
-}
 function renderYearOptions() {
   if (!el.yearSelect) return;
   el.yearSelect.innerHTML = state.years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join('');
-  if (state.years.length && !state.selectedYear) state.selectedYear = state.years[0];
+  if (state.years.length && !state.selectedYear) state.selectedYear = state.years[state.years.length - 1];
   el.yearSelect.value = state.selectedYear;
 }
 function renderPeriodOptions() {
@@ -170,10 +161,9 @@ function renderPeriodOptions() {
   if (state.periods.length && !state.selectedPeriod) state.selectedPeriod = state.periods[0];
   el.periodSelect.value = state.selectedPeriod;
 }
-function getSearchRows() {
+function getSearchRows(){
   const q = normalize(el.searchInput?.value || '');
   return state.records.filter(record => {
-    if (state.selectedYear && String(record.year || '') !== String(state.selectedYear)) return false;
     if (state.selectedPeriod && record.periodLabel !== state.selectedPeriod) return false;
     if (!q) return false;
     return normalize(getDisplayId(record)).includes(q) || normalize(getDisplayName(record)).includes(q);
@@ -192,7 +182,7 @@ function renderSearchResults(){
   el.searchResults.innerHTML = rows.map((record, index) => `
     <div class="search-item ${index === state.searchIndex ? 'active' : ''}" data-index="${index}">
       <div class="search-item-title">${escapeHtml(getDisplayId(record) || '-')} - ${escapeHtml(getDisplayName(record) || '-')}</div>
-      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')} • ${escapeHtml(record.year || '-')}</div>
+      <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')}</div>
     </div>
   `).join('');
   el.searchResults.classList.remove('hidden');
@@ -209,23 +199,11 @@ function hideSubtitleAndPremiumButtons(){
   if (subtitle) subtitle.style.display = 'none';
   if (el.refreshBtn) {
     el.refreshBtn.textContent = '✦ Refresh';
-    Object.assign(el.refreshBtn.style, {
-      background:'linear-gradient(135deg,#ffffff,#eef4ff)',
-      border:'1px solid #cfe0ff',
-      color:'#0f172a',
-      boxShadow:'0 10px 22px rgba(37,99,235,.10)',
-      fontWeight:'800'
-    });
+    Object.assign(el.refreshBtn.style, { background:'linear-gradient(135deg,#ffffff,#eef4ff)', border:'1px solid #cfe0ff', color:'#0f172a', boxShadow:'0 10px 22px rgba(37,99,235,.10)', fontWeight:'800' });
   }
   if (el.syncBtn) {
     el.syncBtn.textContent = '⟳ Reload';
-    Object.assign(el.syncBtn.style, {
-      background:'linear-gradient(135deg,#0f172a,#334155)',
-      border:'1px solid #1e293b',
-      color:'#fff',
-      boxShadow:'0 12px 24px rgba(15,23,42,.18)',
-      fontWeight:'800'
-    });
+    Object.assign(el.syncBtn.style, { background:'linear-gradient(135deg,#0f172a,#334155)', border:'1px solid #1e293b', color:'#fff', boxShadow:'0 12px 24px rgba(15,23,42,.18)', fontWeight:'800' });
   }
 }
 async function loadPdfBytes(bytes){
@@ -269,26 +247,20 @@ async function loadRecord(record){
     setStatus(`Gagal memuat PDF: ${error.message}`);
   }
 }
-async function refreshDirectory(force = false){
+async function fetchYearData(year, force = false){
   setDbState('loading', 'Menghubungkan database...');
-  setStatus(force ? 'Menyegarkan index folder...' : 'Memuat daftar file dari index...');
-  try {
-    const json = await apiGet('list', { forceRefresh: force ? '1' : '' });
-    state.years = json.years || [];
-    state.records = json.files || [];
-    if (!state.selectedYear || !state.years.includes(state.selectedYear)) state.selectedYear = state.years[0] || '';
-    rebuildPeriodsForSelectedYear();
-    renderYearOptions();
-    renderPeriodOptions();
-    saveCache();
-    setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
-    setStatus(`Daftar file siap • ${state.records.length} file`);
-  } catch (error) {
-    if (!force && loadCache()) return;
-    setDbState('error','Gagal terhubung');
-    setStatus(`Error: ${error.message}`);
-    throw error;
-  }
+  setStatus(force ? `Menyegarkan index ${year}...` : `Memuat data ${year}...`);
+  const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' });
+  state.years = json.years || [];
+  state.selectedYear = json.selectedYear || year;
+  state.periods = json.periods || [];
+  state.records = json.files || [];
+  if (!state.periods.includes(state.selectedPeriod)) state.selectedPeriod = state.periods[0] || '';
+  renderYearOptions();
+  renderPeriodOptions();
+  saveCache();
+  setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
+  setStatus(`Daftar ${state.selectedYear} siap • ${state.records.length} file`);
 }
 async function ensurePdfReady() {
   if (state.previewBytes && state.previewBytes.length) return state.previewBytes;
@@ -307,10 +279,7 @@ async function printCurrent(){
   try {
     setStatus('Menyiapkan cetak...');
     const bytes = await ensurePdfReady();
-    if (!bytes || !bytes.length) {
-      setStatus('PDF belum siap untuk dicetak');
-      return;
-    }
+    if (!bytes || !bytes.length) { setStatus('PDF belum siap untuk dicetak'); return; }
     cleanupPrintFrame();
     const blob = new Blob([bytes], { type:'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
@@ -330,46 +299,43 @@ async function printCurrent(){
     setStatus(`Gagal print: ${error.message}`);
   }
 }
-function pickRecord(index){
+async function pickRecord(index){
   const record = state.filteredRecords[index];
   if (!record) return;
   if (el.searchInput) el.searchInput.value = `${getDisplayId(record) || ''} - ${getDisplayName(record) || ''}`.trim();
   hideSearchResults();
-  loadRecord(record);
+  await loadRecord(record);
 }
 function bindEvents(){
-  el.yearSelect?.addEventListener('change', () => {
+  el.yearSelect?.addEventListener('change', async () => {
     state.selectedYear = el.yearSelect.value;
-    rebuildPeriodsForSelectedYear();
-    renderPeriodOptions();
+    state.selectedPeriod = '';
     state.searchIndex = -1;
-    renderSearchResults();
+    hideSearchResults();
+    await fetchYearData(state.selectedYear, false);
   });
   el.periodSelect?.addEventListener('change', () => {
     state.selectedPeriod = el.periodSelect.value;
     state.searchIndex = -1;
     renderSearchResults();
   });
-  el.searchInput?.addEventListener('input', () => {
-    state.searchIndex = -1;
-    renderSearchResults();
-  });
+  el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
   el.searchInput?.addEventListener('focus', renderSearchResults);
-  el.searchInput?.addEventListener('keydown', (event) => {
+  el.searchInput?.addEventListener('keydown', async (event) => {
     if (el.searchResults?.classList.contains('hidden')) return;
     const max = state.filteredRecords.length - 1;
     if (event.key === 'ArrowDown') { event.preventDefault(); state.searchIndex = Math.min(max, state.searchIndex + 1); renderSearchResults(); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); state.searchIndex = Math.max(0, state.searchIndex - 1); renderSearchResults(); }
-    else if (event.key === 'Enter') { event.preventDefault(); if (state.searchIndex >= 0) pickRecord(state.searchIndex); }
+    else if (event.key === 'Enter') { event.preventDefault(); if (state.searchIndex >= 0) await pickRecord(state.searchIndex); }
     else if (event.key === 'Escape') hideSearchResults();
   });
-  el.searchResults?.addEventListener('mousedown', (event) => {
+  el.searchResults?.addEventListener('mousedown', async (event) => {
     const item = event.target.closest('.search-item');
     if (!item) return;
-    pickRecord(Number(item.dataset.index));
+    await pickRecord(Number(item.dataset.index));
   });
   document.addEventListener('click', (event) => { if (!event.target.closest('.search-field')) hideSearchResults(); });
-  el.refreshBtn?.addEventListener('click', () => refreshDirectory(true).catch(console.error));
+  el.refreshBtn?.addEventListener('click', async () => { await fetchYearData(state.selectedYear || '', true); });
   el.syncBtn?.addEventListener('click', async () => { if (state.selectedRecord) await loadRecord(state.selectedRecord); });
   el.printBtn?.addEventListener('click', printCurrent);
   el.settingsBtn?.addEventListener('click', openSettings);
@@ -388,8 +354,9 @@ async function init(){
   }
   try {
     loadCache();
-    await refreshDirectory(false);
-    const first = state.records.find(r => (!state.selectedYear || String(r.year||'')===String(state.selectedYear)) && (!state.selectedPeriod || r.periodLabel===state.selectedPeriod)) || state.records[0];
+    const firstYear = state.selectedYear || '';
+    await fetchYearData(firstYear, false);
+    const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);
   } catch (error) {
     console.error(error);
