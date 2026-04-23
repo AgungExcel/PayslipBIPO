@@ -1,26 +1,16 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v7';
+const CACHE_KEY = 'payslip_bip_list_cache_v8';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const state = {
-  years: [],
-  periods: [],
-  records: [],
-  filteredRecords: [],
-  selectedYear: '',
-  selectedPeriod: '',
-  selectedRecord: null,
-  previewBytes: null,
-  pdfDoc: null,
-  zoom: 1.2,
-  searchIndex: -1,
-  printFrame: null,
+  years: [], periods: [], records: [], filteredRecords: [],
+  selectedYear: '', selectedPeriod: '', selectedRecord: null,
+  previewBytes: null, pdfDoc: null, zoom: 1.2, searchIndex: -1, printFrame: null,
 };
-
 const el = {
   yearSelect: document.getElementById('yearSelect'),
   periodSelect: document.getElementById('periodSelect'),
@@ -58,43 +48,42 @@ function apiUrl(action, params = {}) {
   Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v); });
   return url.toString();
 }
-async function apiGet(action, params = {}) {
-  const res = await fetch(apiUrl(action, params), { cache: 'no-store', redirect: 'follow' });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  let json; try { json = JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON.'); }
-  if (json.ok === false) throw new Error(json.message || 'Request gagal');
-  return json;
+async function apiGet(action, params = {}, timeoutMs = 7000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl(action, params), { cache: 'no-store', redirect: 'follow', signal: controller.signal });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let json; try { json = JSON.parse(text); } catch { throw new Error('Respons Apps Script bukan JSON.'); }
+    if (json.ok === false) throw new Error(json.message || 'Request gagal');
+    return json;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Request timeout. Backend terlalu lama merespons.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
-function parseBase64(base64){
-  const b = atob(base64);
-  const bytes = new Uint8Array(b.length);
-  for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i);
-  return bytes;
-}
+function parseBase64(base64){ const b = atob(base64); const bytes = new Uint8Array(b.length); for(let i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i); return bytes; }
 function saveCache(){
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      at: Date.now(),
-      years: state.years,
-      selectedYear: state.selectedYear,
-      periods: state.periods,
-      records: state.records
+      at: Date.now(), years: state.years, selectedYear: state.selectedYear,
+      periods: state.periods, records: state.records
     }));
   } catch {}
 }
 function loadCache(){
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return false;
+    const raw = localStorage.getItem(CACHE_KEY); if (!raw) return false;
     const parsed = JSON.parse(raw);
     state.years = parsed.years || [];
-    state.selectedYear = parsed.selectedYear || parsed.years?.[0] || '';
+    state.selectedYear = parsed.selectedYear || parsed.years?.[parsed.years.length - 1] || '';
     state.periods = parsed.periods || [];
     state.records = parsed.records || [];
     state.selectedPeriod = state.selectedPeriod || state.periods[0] || '';
-    renderYearOptions();
-    renderPeriodOptions();
+    renderYearOptions(); renderPeriodOptions();
     setDbState('connected', 'Terhubung (cache cepat)');
     setStatus('Daftar file dimuat instan dari index cache');
     return !!state.records.length;
@@ -102,10 +91,7 @@ function loadCache(){
 }
 function extractSrId(record){
   const candidates = [record?.employeeId, record?.employeeCode, record?.srId, record?.fileName].filter(Boolean);
-  for (const value of candidates) {
-    const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/);
-    if (match) return match[0];
-  }
+  for (const value of candidates) { const match = String(value).toUpperCase().match(/\bSR[0-9]{5,}\b/); if (match) return match[0]; }
   return '';
 }
 function extractDisplayName(record){
@@ -171,20 +157,14 @@ function getSearchRows(){
 }
 function renderSearchResults(){
   if (!el.searchResults) return;
-  const rows = getSearchRows();
-  state.filteredRecords = rows;
-  if (!rows.length) {
-    el.searchResults.innerHTML = '';
-    el.searchResults.classList.add('hidden');
-    return;
-  }
+  const rows = getSearchRows(); state.filteredRecords = rows;
+  if (!rows.length){ el.searchResults.innerHTML=''; el.searchResults.classList.add('hidden'); return; }
   if (state.searchIndex < 0 || state.searchIndex > rows.length - 1) state.searchIndex = 0;
   el.searchResults.innerHTML = rows.map((record, index) => `
     <div class="search-item ${index === state.searchIndex ? 'active' : ''}" data-index="${index}">
       <div class="search-item-title">${escapeHtml(getDisplayId(record) || '-')} - ${escapeHtml(getDisplayName(record) || '-')}</div>
       <div class="search-item-sub">${escapeHtml(record.periodLabel || '-')}</div>
-    </div>
-  `).join('');
+    </div>`).join('');
   el.searchResults.classList.remove('hidden');
 }
 function hideSearchResults(){ el.searchResults?.classList.add('hidden'); }
@@ -195,16 +175,9 @@ function syncMetaPanel(){
   if (el.employeeNameText) el.employeeNameText.textContent = getDisplayName(r) || '-';
 }
 function hideSubtitleAndPremiumButtons(){
-  const subtitle = document.querySelector('.toolbar-subtitle');
-  if (subtitle) subtitle.style.display = 'none';
-  if (el.refreshBtn) {
-    el.refreshBtn.textContent = '✦ Refresh';
-    Object.assign(el.refreshBtn.style, { background:'linear-gradient(135deg,#ffffff,#eef4ff)', border:'1px solid #cfe0ff', color:'#0f172a', boxShadow:'0 10px 22px rgba(37,99,235,.10)', fontWeight:'800' });
-  }
-  if (el.syncBtn) {
-    el.syncBtn.textContent = '⟳ Reload';
-    Object.assign(el.syncBtn.style, { background:'linear-gradient(135deg,#0f172a,#334155)', border:'1px solid #1e293b', color:'#fff', boxShadow:'0 12px 24px rgba(15,23,42,.18)', fontWeight:'800' });
-  }
+  const subtitle = document.querySelector('.toolbar-subtitle'); if (subtitle) subtitle.style.display = 'none';
+  if (el.refreshBtn) Object.assign(el.refreshBtn.style, { background:'linear-gradient(135deg,#ffffff,#eef4ff)', border:'1px solid #cfe0ff', color:'#0f172a', boxShadow:'0 10px 22px rgba(37,99,235,.10)', fontWeight:'800' }), el.refreshBtn.textContent='✦ Refresh';
+  if (el.syncBtn) Object.assign(el.syncBtn.style, { background:'linear-gradient(135deg,#0f172a,#334155)', border:'1px solid #1e293b', color:'#fff', boxShadow:'0 12px 24px rgba(15,23,42,.18)', fontWeight:'800' }), el.syncBtn.textContent='⟳ Reload';
 }
 async function loadPdfBytes(bytes){
   state.previewBytes = bytes;
@@ -215,71 +188,50 @@ async function loadPdfBytes(bytes){
   const cssViewport = page.getViewport({ scale: state.zoom });
   const renderViewport = page.getViewport({ scale: state.zoom * scaleRender });
   const wrap = document.createElement('div');
-  wrap.className = 'page-wrap';
-  wrap.style.width = `${cssViewport.width}px`;
-  wrap.style.height = `${cssViewport.height}px`;
+  wrap.className='page-wrap'; wrap.style.width=`${cssViewport.width}px`; wrap.style.height=`${cssViewport.height}px`;
   const canvas = document.createElement('canvas');
-  canvas.className = 'page-canvas';
-  canvas.width = Math.floor(renderViewport.width);
-  canvas.height = Math.floor(renderViewport.height);
-  canvas.style.width = `${cssViewport.width}px`;
-  canvas.style.height = `${cssViewport.height}px`;
+  canvas.className='page-canvas'; canvas.width=Math.floor(renderViewport.width); canvas.height=Math.floor(renderViewport.height);
+  canvas.style.width=`${cssViewport.width}px`; canvas.style.height=`${cssViewport.height}px`;
   const ctx = canvas.getContext('2d', { alpha:false });
   await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
-  if (el.pdfContainer) {
-    el.pdfContainer.innerHTML = '';
-    wrap.appendChild(canvas);
-    el.pdfContainer.appendChild(wrap);
-  }
+  if (el.pdfContainer){ el.pdfContainer.innerHTML=''; wrap.appendChild(canvas); el.pdfContainer.appendChild(wrap); }
   if (el.pageInfo) el.pageInfo.textContent = `Page 1 / ${state.pdfDoc.numPages}`;
 }
 async function loadRecord(record){
   try {
-    state.selectedRecord = record;
-    syncMetaPanel();
-    setStatus('Mengambil PDF asli...');
-    const json = await apiGet('file', { fileId: record.fileId });
-    state.previewBytes = parseBase64(json.base64);
-    await loadPdfBytes(state.previewBytes);
-    setStatus('Preview PDF asli siap');
-  } catch (error) {
-    console.error(error);
-    setStatus(`Gagal memuat PDF: ${error.message}`);
-  }
+    state.selectedRecord = record; syncMetaPanel(); setStatus('Mengambil PDF asli...');
+    const json = await apiGet('file', { fileId: record.fileId }, 10000);
+    state.previewBytes = parseBase64(json.base64); await loadPdfBytes(state.previewBytes); setStatus('Preview PDF asli siap');
+  } catch (error) { console.error(error); setStatus(`Gagal memuat PDF: ${error.message}`); }
 }
 async function fetchYearData(year, force = false){
   setDbState('loading', 'Menghubungkan database...');
-  setStatus(force ? `Menyegarkan index ${year}...` : `Memuat data ${year}...`);
-  const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' });
+  setStatus(force ? `Menyegarkan index ${year || 'semua'}...` : `Memuat data ${year || 'terbaru'}...`);
+  const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' }, force ? 30000 : 7000);
   state.years = json.years || [];
   state.selectedYear = json.selectedYear || year;
   state.periods = json.periods || [];
   state.records = json.files || [];
   if (!state.periods.includes(state.selectedPeriod)) state.selectedPeriod = state.periods[0] || '';
-  renderYearOptions();
-  renderPeriodOptions();
-  saveCache();
+  renderYearOptions(); renderPeriodOptions(); saveCache();
   setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
-  setStatus(`Daftar ${state.selectedYear} siap • ${state.records.length} file`);
+  setStatus(json.needsRefresh ? (json.message || 'Index belum ada, klik Refresh') : `Daftar ${state.selectedYear || '-'} siap • ${state.records.length} file`);
 }
-async function ensurePdfReady() {
+async function ensurePdfReady(){
   if (state.previewBytes && state.previewBytes.length) return state.previewBytes;
-  if (state.selectedRecord?.fileId) {
-    const json = await apiGet('file', { fileId: state.selectedRecord.fileId });
+  if (state.selectedRecord?.fileId){
+    const json = await apiGet('file', { fileId: state.selectedRecord.fileId }, 10000);
     state.previewBytes = parseBase64(json.base64);
     return state.previewBytes;
   }
   return null;
 }
-function cleanupPrintFrame(){
-  if (state.printFrame && state.printFrame.parentNode) state.printFrame.parentNode.removeChild(state.printFrame);
-  state.printFrame = null;
-}
+function cleanupPrintFrame(){ if (state.printFrame && state.printFrame.parentNode) state.printFrame.parentNode.removeChild(state.printFrame); state.printFrame = null; }
 async function printCurrent(){
   try {
     setStatus('Menyiapkan cetak...');
     const bytes = await ensurePdfReady();
-    if (!bytes || !bytes.length) { setStatus('PDF belum siap untuk dicetak'); return; }
+    if (!bytes || !bytes.length){ setStatus('PDF belum siap untuk dicetak'); return; }
     cleanupPrintFrame();
     const blob = new Blob([bytes], { type:'application/pdf' });
     const blobUrl = URL.createObjectURL(blob);
@@ -287,38 +239,24 @@ async function printCurrent(){
     Object.assign(iframe.style, { position:'fixed', right:'0', bottom:'0', width:'1px', height:'1px', border:'0', opacity:'0' });
     state.printFrame = iframe;
     iframe.onload = () => {
-      const win = iframe.contentWindow;
-      if (!win) return;
+      const win = iframe.contentWindow; if (!win) return;
       setTimeout(() => { try { win.focus(); win.print(); setStatus('Dialog print dibuka'); } catch(e) { setStatus('Gagal membuka dialog print'); } }, 700);
       setTimeout(() => { URL.revokeObjectURL(blobUrl); cleanupPrintFrame(); }, 15000);
     };
-    document.body.appendChild(iframe);
-    iframe.src = blobUrl;
-  } catch (error) {
-    console.error(error);
-    setStatus(`Gagal print: ${error.message}`);
-  }
+    document.body.appendChild(iframe); iframe.src = blobUrl;
+  } catch (error) { console.error(error); setStatus(`Gagal print: ${error.message}`); }
 }
 async function pickRecord(index){
-  const record = state.filteredRecords[index];
-  if (!record) return;
+  const record = state.filteredRecords[index]; if (!record) return;
   if (el.searchInput) el.searchInput.value = `${getDisplayId(record) || ''} - ${getDisplayName(record) || ''}`.trim();
-  hideSearchResults();
-  await loadRecord(record);
+  hideSearchResults(); await loadRecord(record);
 }
 function bindEvents(){
   el.yearSelect?.addEventListener('change', async () => {
-    state.selectedYear = el.yearSelect.value;
-    state.selectedPeriod = '';
-    state.searchIndex = -1;
-    hideSearchResults();
+    state.selectedYear = el.yearSelect.value; state.selectedPeriod = ''; state.searchIndex = -1; hideSearchResults();
     await fetchYearData(state.selectedYear, false);
   });
-  el.periodSelect?.addEventListener('change', () => {
-    state.selectedPeriod = el.periodSelect.value;
-    state.searchIndex = -1;
-    renderSearchResults();
-  });
+  el.periodSelect?.addEventListener('change', () => { state.selectedPeriod = el.periodSelect.value; state.searchIndex = -1; renderSearchResults(); });
   el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
   el.searchInput?.addEventListener('focus', renderSearchResults);
   el.searchInput?.addEventListener('keydown', async (event) => {
@@ -330,8 +268,7 @@ function bindEvents(){
     else if (event.key === 'Escape') hideSearchResults();
   });
   el.searchResults?.addEventListener('mousedown', async (event) => {
-    const item = event.target.closest('.search-item');
-    if (!item) return;
+    const item = event.target.closest('.search-item'); if (!item) return;
     await pickRecord(Number(item.dataset.index));
   });
   document.addEventListener('click', (event) => { if (!event.target.closest('.search-field')) hideSearchResults(); });
@@ -341,25 +278,16 @@ function bindEvents(){
   el.settingsBtn?.addEventListener('click', openSettings);
   document.querySelectorAll('[data-close-settings]').forEach(node => node.addEventListener('click', closeSettings));
   el.saveSettingsBtn?.addEventListener('click', saveUiSettings);
-  el.resetLogoBtn?.addEventListener('click', () => { if (el.brandLogo) el.brandLogo.src = './hoplun.jpg'; if (el.logoInput) el.logoInput.value = ''; saveUiSettings(); });
+  el.resetLogoBtn?.addEventListener('click', () => { if (el.brandLogo) el.brandLogo.src='./hoplun.jpg'; if (el.logoInput) el.logoInput.value=''; saveUiSettings(); });
 }
 async function init(){
-  bindEvents();
-  loadUiSettings();
-  hideSubtitleAndPremiumButtons();
-  if (!pdfjsLib) {
-    setDbState('error','PDF.js gagal dimuat');
-    setStatus('Library PDF.js gagal dimuat.');
-    return;
-  }
+  bindEvents(); loadUiSettings(); hideSubtitleAndPremiumButtons();
+  if (!pdfjsLib){ setDbState('error','PDF.js gagal dimuat'); setStatus('Library PDF.js gagal dimuat.'); return; }
   try {
     loadCache();
-    const firstYear = state.selectedYear || '';
-    await fetchYearData(firstYear, false);
+    await fetchYearData(state.selectedYear || '', false);
     const first = state.records.find(r => !state.selectedPeriod || r.periodLabel === state.selectedPeriod) || state.records[0];
     if (first) await loadRecord(first);
-  } catch (error) {
-    console.error(error);
-  }
+  } catch (error) { console.error(error); setStatus(`Error: ${error.message}`); }
 }
 init();
