@@ -1,10 +1,25 @@
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby6jTm5xQmcQAUjdaubsOWOn7Xws4UWjV9uWbOExlEQArCSN6hubMt3U128QjmlWZP0Ow/exec';
 const ROOT_FOLDER_ID = '1NZfDp_9SU50OVDJXLuTcGZNj5JvSdpdX';
-const CACHE_KEY = 'payslip_bip_list_cache_v9';
+const CACHE_KEY = 'payslip_bip_list_cache_v10';
 const SETTINGS_KEY = 'payslip_bip_ui_settings_v1';
 const pdfjsLib = globalThis.pdfjsLib || window.pdfjsLib;
 if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const FONT_BY_MONTH = {
+  '01': '"Trebuchet MS", "Inter", sans-serif',
+  '02': '"Georgia", serif',
+  '03': '"Verdana", "Inter", sans-serif',
+  '04': '"Palatino Linotype", serif',
+  '05': '"Tahoma", "Inter", sans-serif',
+  '06': '"Gill Sans", "Inter", sans-serif',
+  '07': '"Times New Roman", serif',
+  '08': '"Segoe UI", "Inter", sans-serif',
+  '09': '"Cambria", serif',
+  '10': '"Lucida Sans", "Inter", sans-serif',
+  '11': '"Book Antiqua", serif',
+  '12': '"Arial Rounded MT Bold", "Inter", sans-serif'
+};
 
 const state = {
   years: [],
@@ -19,6 +34,7 @@ const state = {
   zoom: 1.2,
   searchIndex: -1,
   printFrame: null,
+  isRefreshing: false,
 };
 
 const el = {
@@ -104,6 +120,7 @@ function loadCache(){
     normalizeYearState();
     renderYearOptions();
     renderPeriodOptions();
+    applyPeriodFont();
     setDbState('connected', 'Terhubung (cache cepat)');
     setStatus('Daftar file dimuat instan dari index cache');
     return !!state.records.length;
@@ -218,10 +235,33 @@ function syncMetaPanel(){
   if (el.employeeIdText) el.employeeIdText.textContent = getDisplayId(r) || '-';
   if (el.employeeNameText) el.employeeNameText.textContent = getDisplayName(r) || '-';
 }
-function hideSubtitleAndPremiumButtons(){
-  const subtitle = document.querySelector('.toolbar-subtitle'); if (subtitle) subtitle.style.display = 'none';
-  if (el.refreshBtn) Object.assign(el.refreshBtn.style, { background:'linear-gradient(135deg,#ffffff,#eef4ff)', border:'1px solid #cfe0ff', color:'#0f172a', boxShadow:'0 10px 22px rgba(37,99,235,.10)', fontWeight:'800' }), el.refreshBtn.textContent='✦ Refresh';
-  if (el.syncBtn) Object.assign(el.syncBtn.style, { background:'linear-gradient(135deg,#0f172a,#334155)', border:'1px solid #1e293b', color:'#fff', boxShadow:'0 12px 24px rgba(15,23,42,.18)', fontWeight:'800' }), el.syncBtn.textContent='⟳ Reload';
+function applyPeriodFont() {
+  const match = String(state.selectedPeriod || '').match(/Payslip-(\d{2})-\d{4}/i);
+  const month = match ? match[1] : '';
+  const font = FONT_BY_MONTH[month] || '"Inter", sans-serif';
+  document.documentElement.style.setProperty('--period-font-family', font);
+  const title = document.querySelector('.toolbar-title');
+  if (title) title.style.fontFamily = font;
+  const brand = document.querySelector('.brand-left h1');
+  if (brand) brand.style.fontFamily = font;
+  if (el.periodSelect) el.periodSelect.style.fontFamily = font;
+  if (el.yearSelect) el.yearSelect.style.fontFamily = font;
+}
+function hideSubtitleAndButtons(){
+  const subtitle = document.querySelector('.toolbar-subtitle');
+  if (subtitle) subtitle.style.display = 'none';
+  if (el.refreshBtn) {
+    Object.assign(el.refreshBtn.style, { background:'linear-gradient(135deg,#ffffff,#eef4ff)', border:'1px solid #cfe0ff', color:'#0f172a', boxShadow:'0 10px 22px rgba(37,99,235,.10)', fontWeight:'800' });
+    el.refreshBtn.textContent='✦ Refresh';
+  }
+  if (el.syncBtn) el.syncBtn.style.display = 'none';
+}
+function setRefreshBusy(isBusy) {
+  state.isRefreshing = isBusy;
+  if (!el.refreshBtn) return;
+  el.refreshBtn.disabled = isBusy;
+  el.refreshBtn.style.opacity = isBusy ? '0.7' : '1';
+  el.refreshBtn.textContent = isBusy ? '⏳ Refreshing...' : '✦ Refresh';
 }
 async function loadPdfBytes(bytes){
   state.previewBytes = bytes;
@@ -262,17 +302,23 @@ async function loadRecord(record){
 }
 async function fetchYearData(year, force = false){
   setDbState('loading', 'Menghubungkan database...');
-  setStatus(force ? `Menyegarkan index ${year || 'semua'}...` : `Memuat data ${year || 'terbaru'}...`);
-  const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' }, force ? 30000 : 7000);
-  state.years = json.years || [];
-  state.selectedYear = json.selectedYear || year || state.selectedYear;
-  state.records = json.files || [];
-  normalizeYearState();
-  renderYearOptions();
-  renderPeriodOptions();
-  saveCache();
-  setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
-  setStatus(json.needsRefresh ? (json.message || 'Index belum ada, klik Refresh') : `Daftar ${state.selectedYear || '-'} siap • ${state.records.length} file`);
+  setStatus(force ? `Menyegarkan ${year || 'semua tahun'}...` : `Memuat data ${year || 'terbaru'}...`);
+  if (force) setRefreshBusy(true);
+  try {
+    const json = await apiGet('list', { year: year, forceRefresh: force ? '1' : '' }, force ? 45000 : 7000);
+    state.years = json.years || [];
+    state.selectedYear = json.selectedYear || year || state.selectedYear;
+    state.records = json.files || [];
+    normalizeYearState();
+    renderYearOptions();
+    renderPeriodOptions();
+    applyPeriodFont();
+    saveCache();
+    setDbState('connected', force ? 'Terhubung (index baru)' : 'Terhubung');
+    setStatus(json.needsRefresh ? (json.message || 'Index belum ada, klik Refresh') : `Daftar ${state.selectedYear || '-'} siap • ${state.records.length} file`);
+  } finally {
+    if (force) setRefreshBusy(false);
+  }
 }
 async function ensurePdfReady(){
   if (state.previewBytes && state.previewBytes.length) return state.previewBytes;
@@ -306,7 +352,8 @@ async function printCurrent(){
 async function pickRecord(index){
   const record = state.filteredRecords[index]; if (!record) return;
   if (el.searchInput) el.searchInput.value = `${getDisplayId(record) || ''} - ${getDisplayName(record) || ''}`.trim();
-  hideSearchResults(); await loadRecord(record);
+  hideSearchResults();
+  await loadRecord(record);
 }
 function bindEvents(){
   el.yearSelect?.addEventListener('change', async () => {
@@ -319,6 +366,7 @@ function bindEvents(){
   el.periodSelect?.addEventListener('change', () => {
     state.selectedPeriod = el.periodSelect.value;
     state.searchIndex = -1;
+    applyPeriodFont();
     renderSearchResults();
   });
   el.searchInput?.addEventListener('input', () => { state.searchIndex = -1; renderSearchResults(); });
@@ -336,8 +384,15 @@ function bindEvents(){
     await pickRecord(Number(item.dataset.index));
   });
   document.addEventListener('click', (event) => { if (!event.target.closest('.search-field')) hideSearchResults(); });
-  el.refreshBtn?.addEventListener('click', async () => { await fetchYearData(state.selectedYear || '', true); });
-  el.syncBtn?.addEventListener('click', async () => { if (state.selectedRecord) await loadRecord(state.selectedRecord); });
+  el.refreshBtn?.addEventListener('click', async () => {
+    if (state.isRefreshing) return;
+    try {
+      await fetchYearData(state.selectedYear || '', true);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Error: ${error.message}`);
+    }
+  });
   el.printBtn?.addEventListener('click', printCurrent);
   el.settingsBtn?.addEventListener('click', openSettings);
   document.querySelectorAll('[data-close-settings]').forEach(node => node.addEventListener('click', closeSettings));
@@ -347,7 +402,7 @@ function bindEvents(){
 async function init(){
   bindEvents();
   loadUiSettings();
-  hideSubtitleAndPremiumButtons();
+  hideSubtitleAndButtons();
   if (!pdfjsLib){ setDbState('error','PDF.js gagal dimuat'); setStatus('Library PDF.js gagal dimuat.'); return; }
   try {
     loadCache();
